@@ -22,8 +22,10 @@ import logging
 import time
 
 import numpy as np
+import OpenGL.GL.shaders
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from OpenGL.arrays import ArrayDatatype as ADT
 import pygame
 from pygame.locals import *
 
@@ -31,6 +33,28 @@ import boxpack
 
 
 SCREEN_SIZE = (1600, 1200)
+
+VERTEX_SHADER = """
+layout(location = 0) in vec3 in_pos;
+layout(location = 1) in vec2 in_tc;
+varying vec4 tc;
+
+void main(void)
+{
+   tc = in_tc;
+   k = gl_ModelViewProjectionMatrix * in_pos;
+}
+"""
+
+FRAGMENT_SHADER = """
+uniform sampler2D lightmap;
+varying vec2 tc;
+
+void main(void)
+{
+   gl_FragColor = texture2D(lightmap, tc).bgra;
+}
+"""
 
 
 def iter_face_verts(bsp_file, face_idx):
@@ -148,41 +172,69 @@ class Renderer:
 
         glTexImage2Df(GL_TEXTURE_2D, 0, 3, 0, GL_RGB, (self._lightmap_image / 255.) ** 0.5)
 
+    def _setup_buffer_objects(self):
+        vertex_array = [v for face_idx in range(len(self._bsp_file.faces))
+                          if face_idx in self._lightmap_texcoords
+                          for v in self._face_coords[face_idx]]
+        texcoord_array = [v for face_idx in range(len(self._bsp_file.faces))
+                            if face_idx in self._lightmap_texcoords
+                            for v in self._lightmap_texcoords[face_idx]]
+
+        vert_idx = 0
+        index_array = []
+        for face_idx in range(len(self._bsp_file.faces)):
+            if face_idx in self._lightmap_texcoords:
+                num_verts_in_face = len(self._face_coords[face_idx])
+                for i in range(1, num_verts_in_face - 1):
+                    index_array.extend([vert_idx, vert_idx + i, vert_idx + i + 1])
+                vert_idx += num_verts_in_face
+
+        vertex_array = np.array(vertex_array, dtype=np.float32)
+        texcoord_array = np.array(texcoord_array, dtype=np.float32)
+        index_array = np.array(index_array, dtype=np.uint32)
+
+        pos_bo, texcoord_bo, self._index_bo = glGenBuffers(3)
+        
+        # Set up the vertex position buffer
+        glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
+        glBufferData(GL_ARRAY_BUFFER, ADT.arrayByteCount(vertex_array), vertex_array, GL_STATIC_DRAW)
+        glEnableClientState(GL_VERTEX_ARRAY)
+        glVertexPointer(3, GL_FLOAT, 12, None)
+
+        # Set up the tex coord buffer
+        glBindBuffer(GL_ARRAY_BUFFER, texcoord_bo);
+        glBufferData(GL_ARRAY_BUFFER, ADT.arrayByteCount(texcoord_array), texcoord_array, GL_STATIC_DRAW);
+        glClientActiveTexture(GL_TEXTURE0)
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY)
+        glTexCoordPointer(2, GL_FLOAT, 8, None)
+
+        # Set up the index buffer
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, ADT.arrayByteCount(index_array), index_array, GL_STATIC_DRAW)
+
     def _get_time(self):
         return time.perf_counter() - self._game_start_time
 
     def _draw_bsp(self):
-        #glColor([255., 1., 0.])
-        #glBegin(GL_LINES)
-        #for e1, e2 in self._bsp_file.edges:
-        #    glVertex(self._bsp_file.vertices[e1])
-        #    glVertex(self._bsp_file.vertices[e2])
-        #glEnd()
-
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self._lightmap_texture_id)
-        for face_idx in range(len(self._bsp_file.faces)):
-            if face_idx not in self._lightmap_texcoords:
-                continue
-            glBegin(GL_TRIANGLE_FAN)
-            for vert_coords, tex_coords in zip(self._face_coords[face_idx], self._lightmap_texcoords[face_idx]):
-                glTexCoord2f(*tex_coords)
-                glVertex3f(*vert_coords)
-            glEnd()
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
+        glDrawElements(GL_TRIANGLES, 39000, GL_UNSIGNED_INT, None)
 
     def _draw_frame(self):
         self._fps_display.new_frame()
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        #glUseProgram(self._shader)
+
         glLoadIdentity()
         glRotatef (-90,  1, 0, 0)
         glRotatef (90,  0, 0, 1)
-        
+
         glRotatef(90, 0, -1, 0)
         glTranslate(*-(self._centre + [0, 0, 3000 - 100 * self._get_time()]))
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         self._draw_bsp()
-
-        self._last_frame_time = time.perf_counter()
 
     def run(self):
         self._fps_display = FpsDisplay()
@@ -191,9 +243,14 @@ class Renderer:
         pygame.init()
         screen = pygame.display.set_mode(SCREEN_SIZE, HWSURFACE | OPENGL | DOUBLEBUF)
         self._setup_textures()
+        self._setup_buffer_objects()
         glEnable(GL_DEPTH_TEST)
         self.resize(*SCREEN_SIZE)
 
+        #self._shader = OpenGL.GL.shaders.compileProgram(
+        #    OpenGL.GL.shaders.compileShader(VERTEX_SHADER, GL_VERTEX_SHADER),
+        #    OpenGL.GL.shaders.compileShader(FRAGMENT_SHADER, GL_FRAGMENT_SHADER)
+        #)
         self._centre = np.array(self._bsp_file.vertices).mean(axis=0)
 
         x = 0.
