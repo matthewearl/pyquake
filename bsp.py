@@ -36,6 +36,7 @@ import boxpack
 
 Face = collections.namedtuple('Face', ('edge_list_idx', 'num_edges', 'texinfo_id', 'lightmap_offset'))
 TexInfo = collections.namedtuple('TexInfo', ('vec_s', 'dist_s', 'vec_t', 'dist_t'))
+Model = collections.namedtuple('Model', ('first_face_idx', 'num_faces'))
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
 
@@ -96,6 +97,12 @@ class BspFile:
         lightmap_dir_entry = self._read_dir_entry(f, 8)
         f.seek(lightmap_dir_entry.offset)
         self.lightmap = self._read(f, lightmap_dir_entry.size)
+
+        logging.debug("Reading models")
+        def read_model(mins1, mins2, mins3, maxs1, maxs2, maxs3, o1, o2, o3, n1, n2, n3, n4, num_leaves, first_face_idx,
+                       num_faces):
+            return Model(first_face_idx, num_faces)
+        self.models = self._read_lump(f, self._read_dir_entry(f, 14), "<ffffffffflllllll", read_model)
 
 
 if __name__ == "__main__":

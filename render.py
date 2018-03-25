@@ -30,9 +30,19 @@ import pygame
 from pygame.locals import *
 
 import boxpack
+import proto
 
 
 SCREEN_SIZE = (1600, 1200)
+
+COLOR_CYCLE = [
+    (1., 0., 0.),
+    (0., 1., 0.),
+    (0., 0., 1.),
+    (0., 1., 1.),
+    (1., 0., 1.),
+    (1., 1., 0.),
+]
 
 VERTEX_SHADER = """
 layout(location = 0) in vec3 in_pos;
@@ -147,9 +157,58 @@ class FpsDisplay:
             self._last_display_time = t
 
 
+class DemoView:
+    def __init__(self, demo_file_name):
+        self._view_iter = self._view_gen(demo_file_name)
+        self.map_name = None
+        self._prev_view_angle, self._prev_pos, self._prev_time = next(self._view_iter)
+        self._next_view_angle, self._next_pos, self._next_time = next(self._view_iter)
+        assert self.map_name is not None
+
+    def _patch_vec(self, old_vec, update):
+        return tuple(v if u is None else u for v, u in zip(old_vec, update))
+                
+    def _view_gen(self, demo_file_name):
+        with open(demo_file_name, "rb") as f:
+            pos = (None, None, None)
+            time = None
+            for view_angle, msg in proto.read_demo_file(f):
+                if msg.msg_type == proto.ServerMessageType.SERVERINFO:
+                    self.map_name = msg.models[0]
+                if (msg.msg_type == proto.ServerMessageType.UPDATE and
+                        msg.entity_num == 1):
+                    pos = self._patch_vec(pos, msg.origin)
+                elif msg.msg_type == proto.ServerMessageType.TIME:
+                    if time is not None and all(x is not None for x in pos):
+                        yield view_angle, pos, time
+                    time = msg.time
+
+    def _interp_vec(self, prev, next_, frac):
+        return tuple(p * (1. - frac) + n * frac for p, n in zip(prev, next_))
+
+    def _interp(self, prev_view_angle, prev_pos, prev_time, next_view_angle, next_pos, next_time, t):
+        frac = (t - prev_time) / (next_time - prev_time)
+        view_angle = self._interp_vec(prev_view_angle, next_view_angle, frac)
+        pos = self._interp_vec(prev_pos, next_pos, frac)
+        return view_angle, pos
+
+    def get_view_at_time(self, t):
+        while t > self._next_time:
+            self._prev_view_angle, self._prev_pos, self._prev_time = \
+                        self._next_view_angle, self._next_pos, self._next_time
+            self._next_view_angle, self._next_pos, self._next_time = next(self._view_iter)
+
+        if t < self._prev_time:
+            t = self._prev_time
+
+        return self._interp(self._prev_view_angle, self._prev_pos, self._prev_time, self._next_view_angle,
+                            self._next_pos, self._next_time, t)
+
+
 class Renderer:
-    def __init__(self, bsp_file):
+    def __init__(self, bsp_file, demo_views):
         self._bsp_file = bsp_file
+        self._demo_views = demo_views
         self._lightmap_image, self._lightmap_texcoords = make_full_lightmap(self._bsp_file)
         self._lightmap_image = np.stack([self._lightmap_image] * 3, axis=2)
         self._face_coords = get_face_coords(self._bsp_file)
@@ -170,7 +229,7 @@ class Renderer:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
 
-        glTexImage2Df(GL_TEXTURE_2D, 0, 3, 0, GL_RGB, (self._lightmap_image / 255.) ** 0.5)
+        glTexImage2Df(GL_TEXTURE_2D, 0, 3, 0, GL_RGB, self._lightmap_image / 255.)
 
     def _setup_buffer_objects(self):
         vertex_array = [v for face_idx in range(len(self._bsp_file.faces))
@@ -179,7 +238,12 @@ class Renderer:
         texcoord_array = [v for face_idx in range(len(self._bsp_file.faces))
                             if face_idx in self._lightmap_texcoords
                             for v in self._lightmap_texcoords[face_idx]]
-
+        model_faces = {i for m in self._bsp_file.models[1:]
+                         for i in range(m.first_face_idx, m.first_face_idx + m.num_faces)}
+        color_array = [[0, 1, 0] if face_idx in model_faces else [1, 1, 1]
+                         for face_idx in range(len(self._bsp_file.faces))
+                         if face_idx in self._lightmap_texcoords
+                         for v in self._lightmap_texcoords[face_idx]]
         vert_idx = 0
         index_array = []
         for face_idx in range(len(self._bsp_file.faces)):
@@ -191,9 +255,11 @@ class Renderer:
 
         vertex_array = np.array(vertex_array, dtype=np.float32)
         texcoord_array = np.array(texcoord_array, dtype=np.float32)
+        color_array = np.array(color_array, dtype=np.float32)
         index_array = np.array(index_array, dtype=np.uint32)
+        self._index_array_len = len(index_array)
 
-        pos_bo, texcoord_bo, self._index_bo = glGenBuffers(3)
+        pos_bo, texcoord_bo, color_bo, self._index_bo = glGenBuffers(4)
         
         # Set up the vertex position buffer
         glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
@@ -208,6 +274,12 @@ class Renderer:
         glEnableClientState(GL_TEXTURE_COORD_ARRAY)
         glTexCoordPointer(2, GL_FLOAT, 8, None)
 
+        # Set up the color buffer
+        glBindBuffer(GL_ARRAY_BUFFER, color_bo);
+        glBufferData(GL_ARRAY_BUFFER, ADT.arrayByteCount(color_array), color_array, GL_STATIC_DRAW);
+        glEnableClientState(GL_COLOR_ARRAY)
+        glColorPointer(3, GL_FLOAT, 0, None)
+
         # Set up the index buffer
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, ADT.arrayByteCount(index_array), index_array, GL_STATIC_DRAW)
@@ -219,7 +291,37 @@ class Renderer:
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self._lightmap_texture_id)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
-        glDrawElements(GL_TRIANGLES, 39000, GL_UNSIGNED_INT, None)
+        glDrawElements(GL_TRIANGLES, self._index_array_len, GL_UNSIGNED_INT, None)
+
+    def _show_demo_views(self):
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_DEPTH_TEST)
+        glMatrixMode(GL_MODELVIEW)
+
+        for idx, demo_view in enumerate(self._demo_views[:]):
+            glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
+            try:
+                view_angle, pos = demo_view.get_view_at_time(self._get_time())
+            except StopIteration:
+                continue
+            glPushMatrix()
+            glTranslate(*pos)
+            glScalef(30, 30, 30);
+            glBegin(GL_TRIANGLE_FAN)
+            for theta in np.arange(0, 1, 0.1) * 2 * np.pi:
+                glVertex3f(np.sin(theta), np.cos(theta), 0.)
+            glEnd()
+            glPopMatrix()
+
+        glPopAttrib()
+
+    def _set_view_from_demo(self):
+        view_angle, pos = self._demo_views[0].get_view_at_time(self._get_time())
+
+        glRotatef(-view_angle[0], 0, 1, 0)
+        glRotatef(-view_angle[1], 0, 0, 1)
+        glTranslate(*-np.array(pos))
 
     def _draw_frame(self):
         self._fps_display.new_frame()
@@ -231,10 +333,13 @@ class Renderer:
         glRotatef (-90,  1, 0, 0)
         glRotatef (90,  0, 0, 1)
 
+        #self._set_view_from_demo()
         glRotatef(90, 0, -1, 0)
-        glTranslate(*-(self._centre + [0, 0, 3000 - 100 * self._get_time()]))
+        glTranslate(*-(self._centre + [0, 0, 3000]))
 
         self._draw_bsp()
+
+        self._show_demo_views()
 
     def run(self):
         self._fps_display = FpsDisplay()
@@ -247,10 +352,6 @@ class Renderer:
         glEnable(GL_DEPTH_TEST)
         self.resize(*SCREEN_SIZE)
 
-        #self._shader = OpenGL.GL.shaders.compileProgram(
-        #    OpenGL.GL.shaders.compileShader(VERTEX_SHADER, GL_VERTEX_SHADER),
-        #    OpenGL.GL.shaders.compileShader(FRAGMENT_SHADER, GL_FRAGMENT_SHADER)
-        #)
         self._centre = np.array(self._bsp_file.vertices).mean(axis=0)
 
         x = 0.
@@ -279,8 +380,12 @@ if __name__ == "__main__":
     root_logger.setLevel(logging.DEBUG)
 
     fs = pak.Filesystem(sys.argv[1])
-    bsp_file = bsp.BspFile(io.BytesIO(fs[sys.argv[2]]))
 
-    renderer = Renderer(bsp_file)
+    demo_views = [DemoView(fname) for fname in sys.argv[2:]]
+    if not len(set(dv.map_name for dv in demo_views)) == 1:
+        raise Exception("Demos are on different maps")
+    bsp_file = bsp.BspFile(io.BytesIO(fs[demo_views[0].map_name]))
+
+    renderer = Renderer(bsp_file, demo_views)
     renderer.run()
 
