@@ -336,6 +336,11 @@ class ServerMessageNop(NoFieldsServerMessage):
 
 
 @_register_server_message
+class ServerMessageFoundSecret(NoFieldsServerMessage):
+    msg_type = ServerMessageType.FOUNDSECRET
+
+
+@_register_server_message
 class ServerMessagePrint(ServerMessage):
     field_names = ('string',)
     msg_type = ServerMessageType.PRINT
@@ -350,6 +355,17 @@ class ServerMessagePrint(ServerMessage):
 class ServerMessageCenterPrint(ServerMessage):
     field_names = ('string',)
     msg_type = ServerMessageType.CENTERPRINT
+
+    @classmethod
+    def parse(cls, m):
+        s, m = cls._parse_string(m)
+        return cls(s), m
+
+
+@_register_server_message
+class ServerMessageCutScene(ServerMessage):
+    field_names = ('string',)
+    msg_type = ServerMessageType.CUTSCENE
 
     @classmethod
     def parse(cls, m):
@@ -404,19 +420,36 @@ class ServerMessageSignOnNum(StructServerMessage):
 
 @_register_server_message
 class ServerMessageSpawnBaseline(ServerMessage):
-    field_names = ("entity_num", "model_index", "frame", "colormap", "skin", "origin", "angles")
+    field_names = ("entity_num", "model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNBASELINE
 
     @classmethod
     def parse(cls, m):
-        (entity_num, model_index, frame, colormap, skin), m = cls._parse_struct("<HBBBB", m)
+        (entity_num, model_num, frame, colormap, skin), m = cls._parse_struct("<HBBBB", m)
         origin, angles = [], []
         for _ in range(3):
             o, m = cls._parse_coord(m)
             a, m = cls._parse_angle(m)
             origin.append(o)
             angles.append(a)
-        return cls(entity_num, model_index, frame, colormap, skin, tuple(origin), tuple(angles)), m
+        return cls(entity_num, model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
+
+
+@_register_server_message
+class ServerMessageSpawnStatic(ServerMessage):
+    field_names = ("model_num", "frame", "colormap", "skin", "origin", "angles")
+    msg_type = ServerMessageType.SPAWNSTATIC
+
+    @classmethod
+    def parse(cls, m):
+        (model_num, frame, colormap, skin), m = cls._parse_struct("<BBBB", m)
+        origin, angles = [], []
+        for _ in range(3):
+            o, m = cls._parse_coord(m)
+            a, m = cls._parse_angle(m)
+            origin.append(o)
+            angles.append(a)
+        return cls(model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
 
 
 @_register_server_message

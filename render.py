@@ -18,16 +18,22 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import copy
+import ctypes
+import hashlib
 import logging
+import os
+import pickle
 import time
 
-import numpy as np
-import OpenGL.GL.shaders
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.arrays import ArrayDatatype as ADT
-import pygame
 from pygame.locals import *
+import numpy as np
+import OpenGL.GL.shaders
+import pygame
+import scipy.interpolate
 
 import boxpack
 import proto
@@ -43,28 +49,6 @@ COLOR_CYCLE = [
     (1., 0., 1.),
     (1., 1., 0.),
 ]
-
-VERTEX_SHADER = """
-layout(location = 0) in vec3 in_pos;
-layout(location = 1) in vec2 in_tc;
-varying vec4 tc;
-
-void main(void)
-{
-   tc = in_tc;
-   k = gl_ModelViewProjectionMatrix * in_pos;
-}
-"""
-
-FRAGMENT_SHADER = """
-uniform sampler2D lightmap;
-varying vec2 tc;
-
-void main(void)
-{
-   gl_FragColor = texture2D(lightmap, tc).bgra;
-}
-"""
 
 
 def iter_face_verts(bsp_file, face_idx):
@@ -157,57 +141,85 @@ class FpsDisplay:
             self._last_display_time = t
 
 
+class _DemoCacheMiss(Exception):
+    pass
+
+
 class DemoView:
     def __init__(self, demo_file_name):
-        self._view_iter = self._view_gen(demo_file_name)
-        self.map_name = None
-        self._prev_view_angle, self._prev_pos, self._prev_time = next(self._view_iter)
-        self._next_view_angle, self._next_pos, self._next_time = next(self._view_iter)
-        assert self.map_name is not None
+        cache_fname = self._get_cache_filename(demo_file_name)
+
+        try:
+            view_angles, positions, times, self.map_name = self._check_cache(cache_fname)
+            logging.info("Read demo %s from cache %s", demo_file_name, cache_fname)
+        except _DemoCacheMiss:
+            logging.info("Reading demo %s", demo_file_name)
+            data = list(self._view_gen(demo_file_name))
+            view_angles, positions, times = (np.array([x[i] for x in data]) for i in range(3))
+            self._set_cache(cache_fname, view_angles, positions, times, self.map_name)
+
+        self._view_angle_interp = scipy.interpolate.interp1d(times, view_angles,
+                                                             axis=0,
+                                                             bounds_error=False,
+                                                             fill_value=(view_angles[0], view_angles[-1]))
+        self._pos_interp = scipy.interpolate.interp1d(times, positions,
+                                                      axis=0,
+                                                      bounds_error=False,
+                                                      fill_value=(positions[0], positions[-1]))
+
+    def _get_cache_filename(self, demo_file_name):
+        with open(demo_file_name, "rb") as f:
+            s = f.read()
+        return os.path.join("democache", "{}.pickle".format(hashlib.sha1(s).hexdigest()))
+
+    def _check_cache(self, cache_fname):
+        try:
+            with open(cache_fname, "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            raise _DemoCacheMiss
+
+    def _set_cache(self, cache_fname, view_angles, positions, times, map_name):
+        with open(cache_fname, "wb") as f:
+            pickle.dump((view_angles, positions, times, map_name), f)
 
     def _patch_vec(self, old_vec, update):
         return tuple(v if u is None else u for v, u in zip(old_vec, update))
                 
     def _view_gen(self, demo_file_name):
         with open(demo_file_name, "rb") as f:
-            pos = (None, None, None)
             time = None
+            entity_num_to_model_num = {}
             for view_angle, msg in proto.read_demo_file(f):
                 if msg.msg_type == proto.ServerMessageType.SERVERINFO:
                     self.map_name = msg.models[0]
-                if (msg.msg_type == proto.ServerMessageType.UPDATE and
-                        msg.entity_num == 1):
-                    pos = self._patch_vec(pos, msg.origin)
+                    model_nums = [idx + 1 for idx, model_name in enumerate(msg.models)
+                                          if model_name[0] == '*' or idx == 0]
+                    model_num_idx = {model_num: idx + 1 for idx, model_num in enumerate(model_nums)}
+                    pos = np.zeros((1 + len(model_nums), 3))
+                if msg.msg_type == proto.ServerMessageType.SPAWNBASELINE and msg.model_num in model_nums:
+                    entity_num_to_model_num[msg.entity_num] = msg.model_num
+                if (msg.msg_type in (proto.ServerMessageType.UPDATE, proto.ServerMessageType.SPAWNBASELINE)  and
+                    (msg.entity_num == 1 or msg.entity_num in entity_num_to_model_num)):
+                    if msg.entity_num == 1:
+                        idx = 0
+                    else:
+                        idx = model_num_idx[entity_num_to_model_num[msg.entity_num]]
+                    pos[idx] = self._patch_vec(pos[idx], msg.origin)
                 elif msg.msg_type == proto.ServerMessageType.TIME:
                     if time is not None and all(x is not None for x in pos):
-                        yield view_angle, pos, time
+                        yield view_angle, copy.copy(pos), time
                     time = msg.time
 
-    def _interp_vec(self, prev, next_, frac):
-        return tuple(p * (1. - frac) + n * frac for p, n in zip(prev, next_))
-
-    def _interp(self, prev_view_angle, prev_pos, prev_time, next_view_angle, next_pos, next_time, t):
-        frac = (t - prev_time) / (next_time - prev_time)
-        view_angle = self._interp_vec(prev_view_angle, next_view_angle, frac)
-        pos = self._interp_vec(prev_pos, next_pos, frac)
-        return view_angle, pos
-
     def get_view_at_time(self, t):
-        while t > self._next_time:
-            self._prev_view_angle, self._prev_pos, self._prev_time = \
-                        self._next_view_angle, self._next_pos, self._next_time
-            self._next_view_angle, self._next_pos, self._next_time = next(self._view_iter)
-
-        if t < self._prev_time:
-            t = self._prev_time
-
-        return self._interp(self._prev_view_angle, self._prev_pos, self._prev_time, self._next_view_angle,
-                            self._next_pos, self._next_time, t)
+        all_pos = self._pos_interp(t)
+        return self._view_angle_interp(t), all_pos[0], all_pos[1:]
 
 
 class Renderer:
     def __init__(self, bsp_file, demo_views):
         self._bsp_file = bsp_file
+        self._bsp_model_origins = np.zeros((len(bsp_file.models), 3))
         self._demo_views = demo_views
         self._lightmap_image, self._lightmap_texcoords = make_full_lightmap(self._bsp_file)
         self._lightmap_image = np.stack([self._lightmap_image] * 3, axis=2)
@@ -244,6 +256,9 @@ class Renderer:
                          for face_idx in range(len(self._bsp_file.faces))
                          if face_idx in self._lightmap_texcoords
                          for v in self._lightmap_texcoords[face_idx]]
+
+        # Array of indices into the vertex array such that rendering vertices in this order with GL_TRIANGLES will
+        # produce all of the models in the map.
         vert_idx = 0
         index_array = []
         for face_idx in range(len(self._bsp_file.faces)):
@@ -252,6 +267,18 @@ class Renderer:
                 for i in range(1, num_verts_in_face - 1):
                     index_array.extend([vert_idx, vert_idx + i, vert_idx + i + 1])
                 vert_idx += num_verts_in_face
+
+        # Make a dict from faces indices to (idx, count) pairs such that index_array[idx:idx + count] gives the vertices
+        # to render this face.
+        vert_idx = 0
+        self._face_to_idx = {}
+        for face_idx in range(len(self._bsp_file.faces)):
+            if face_idx in self._lightmap_texcoords:
+                num_verts_in_face = len(self._face_coords[face_idx])
+                self._face_to_idx[face_idx] = (vert_idx, 3 * (num_verts_in_face - 2))
+                vert_idx += 3 * (num_verts_in_face - 2)
+            else:
+                self._face_to_idx[face_idx] = (vert_idx, 0)
 
         vertex_array = np.array(vertex_array, dtype=np.float32)
         texcoord_array = np.array(texcoord_array, dtype=np.float32)
@@ -285,13 +312,23 @@ class Renderer:
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, ADT.arrayByteCount(index_array), index_array, GL_STATIC_DRAW)
 
     def _get_time(self):
-        return time.perf_counter() - self._game_start_time
+        return (time.perf_counter() - self._game_start_time)
 
     def _draw_bsp(self):
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self._lightmap_texture_id)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
-        glDrawElements(GL_TRIANGLES, self._index_array_len, GL_UNSIGNED_INT, None)
+        _, _, model_pos = self._demo_views[0].get_view_at_time(self._get_time())
+
+        for idx, m in enumerate(self._bsp_file.models):
+            start_idx, _ = self._face_to_idx[m.first_face_idx]
+            end_idx, n = self._face_to_idx[m.first_face_idx + m.num_faces - 1]
+            end_idx += n
+            glPushMatrix()
+            #print(idx, model_pos[idx])
+            glTranslate(*model_pos[idx])
+            glDrawElements(GL_TRIANGLES, end_idx - start_idx, GL_UNSIGNED_INT, ctypes.c_void_p(4 * start_idx))
+            glPopMatrix()
 
     def _show_demo_views(self):
         glPushAttrib(GL_ENABLE_BIT)
@@ -299,25 +336,35 @@ class Renderer:
         glDisable(GL_DEPTH_TEST)
         glMatrixMode(GL_MODELVIEW)
 
-        for idx, demo_view in enumerate(self._demo_views[:]):
-            glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
+        for idx, demo_view in enumerate(self._demo_views[1:]):
+            #glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            if idx == 0:
+                glColor4f(1, 1, 0, 1.)
+            else:
+                glColor4f(1, 0, 0, 0.05)
             try:
-                view_angle, pos = demo_view.get_view_at_time(self._get_time())
+                view_angle, pos, _ = demo_view.get_view_at_time(self._get_time())
             except StopIteration:
                 continue
             glPushMatrix()
             glTranslate(*pos)
             glScalef(30, 30, 30);
             glBegin(GL_TRIANGLE_FAN)
-            for theta in np.arange(0, 1, 0.1) * 2 * np.pi:
+            for theta in np.arange(0, 1, 0.25) * 2 * np.pi:
                 glVertex3f(np.sin(theta), np.cos(theta), 0.)
+            for theta in np.arange(0, 1, 0.25) * 2 * np.pi:
+                glVertex3f(np.sin(theta),  0., np.cos(theta))
+            for theta in np.arange(0, 1, 0.25) * 2 * np.pi:
+                glVertex3f(0., np.sin(theta), np.cos(theta))
             glEnd()
             glPopMatrix()
 
         glPopAttrib()
 
     def _set_view_from_demo(self):
-        view_angle, pos = self._demo_views[0].get_view_at_time(self._get_time())
+        view_angle, pos, _ = self._demo_views[0].get_view_at_time(self._get_time())
 
         glRotatef(-view_angle[0], 0, 1, 0)
         glRotatef(-view_angle[1], 0, 0, 1)
@@ -333,9 +380,9 @@ class Renderer:
         glRotatef (-90,  1, 0, 0)
         glRotatef (90,  0, 0, 1)
 
-        #self._set_view_from_demo()
-        glRotatef(90, 0, -1, 0)
-        glTranslate(*-(self._centre + [0, 0, 3000]))
+        self._set_view_from_demo()
+        #glRotatef(90, 0, -1, 0)
+        #glTranslate(*-(self._centre + [0, 0, 3000]))
 
         self._draw_bsp()
 
@@ -361,6 +408,10 @@ class Renderer:
                     return
                 if event.type == KEYUP and event.key == K_ESCAPE:
                     return                
+                if event.type == KEYUP and event.key == ord('n'):
+                    self._game_start_time += 1.0
+                if event.type == KEYUP and event.key == ord('m'):
+                    self._game_start_time -= 1.0
             self._draw_frame()
             pygame.display.flip()
 
@@ -382,10 +433,11 @@ if __name__ == "__main__":
     fs = pak.Filesystem(sys.argv[1])
 
     demo_views = [DemoView(fname) for fname in sys.argv[2:]]
-    if not len(set(dv.map_name for dv in demo_views)) == 1:
-        raise Exception("Demos are on different maps")
+    map_name = demo_views[0].map_name
+    demo_views = [dv for dv in demo_views if dv.map_name == map_name]
     bsp_file = bsp.BspFile(io.BytesIO(fs[demo_views[0].map_name]))
 
     renderer = Renderer(bsp_file, demo_views)
     renderer.run()
+
 
