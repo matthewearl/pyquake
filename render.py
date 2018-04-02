@@ -18,27 +18,24 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import copy
 import ctypes
-import hashlib
 import logging
-import os
-import pickle
 import time
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from OpenGL.GLUT import *
 from OpenGL.arrays import ArrayDatatype as ADT
 from pygame.locals import *
 import numpy as np
 import OpenGL.GL.shaders
 import pygame
-import scipy.interpolate
 
 import boxpack
-import proto
+import demo
 
 
+REFERENCE_RADIUS = 100
 SCREEN_SIZE = (1600, 1200)
 
 COLOR_CYCLE = [
@@ -141,79 +138,25 @@ class FpsDisplay:
             self._last_display_time = t
 
 
-class _DemoCacheMiss(Exception):
-    pass
+class Timer:
+    def __init__(self):
+        self._last_perf_counter = time.perf_counter()
+        self.time = 0.
+        self.timescale = 1.0
+        self.paused = False
 
+    def update(self):
+        pc = time.perf_counter()
+        if not self.paused:
+            self.time += (pc - self._last_perf_counter) * self.timescale
+        self._last_perf_counter = pc
 
-class DemoView:
-    def __init__(self, demo_file_name):
-        cache_fname = self._get_cache_filename(demo_file_name)
+    def shift(self, offset):
+        self.time += offset
 
-        try:
-            view_angles, positions, times, self.map_name = self._check_cache(cache_fname)
-            logging.info("Read demo %s from cache %s", demo_file_name, cache_fname)
-        except _DemoCacheMiss:
-            logging.info("Reading demo %s", demo_file_name)
-            data = list(self._view_gen(demo_file_name))
-            view_angles, positions, times = (np.array([x[i] for x in data]) for i in range(3))
-            self._set_cache(cache_fname, view_angles, positions, times, self.map_name)
-
-        self._view_angle_interp = scipy.interpolate.interp1d(times, view_angles,
-                                                             axis=0,
-                                                             bounds_error=False,
-                                                             fill_value=(view_angles[0], view_angles[-1]))
-        self._pos_interp = scipy.interpolate.interp1d(times, positions,
-                                                      axis=0,
-                                                      bounds_error=False,
-                                                      fill_value=(positions[0], positions[-1]))
-
-    def _get_cache_filename(self, demo_file_name):
-        with open(demo_file_name, "rb") as f:
-            s = f.read()
-        return os.path.join("democache", "{}.pickle".format(hashlib.sha1(s).hexdigest()))
-
-    def _check_cache(self, cache_fname):
-        try:
-            with open(cache_fname, "rb") as f:
-                return pickle.load(f)
-        except FileNotFoundError:
-            raise _DemoCacheMiss
-
-    def _set_cache(self, cache_fname, view_angles, positions, times, map_name):
-        with open(cache_fname, "wb") as f:
-            pickle.dump((view_angles, positions, times, map_name), f)
-
-    def _patch_vec(self, old_vec, update):
-        return tuple(v if u is None else u for v, u in zip(old_vec, update))
-                
-    def _view_gen(self, demo_file_name):
-        with open(demo_file_name, "rb") as f:
-            time = None
-            entity_num_to_model_num = {}
-            for view_angle, msg in proto.read_demo_file(f):
-                if msg.msg_type == proto.ServerMessageType.SERVERINFO:
-                    self.map_name = msg.models[0]
-                    model_nums = [idx + 1 for idx, model_name in enumerate(msg.models)
-                                          if model_name[0] == '*' or idx == 0]
-                    model_num_idx = {model_num: idx + 1 for idx, model_num in enumerate(model_nums)}
-                    pos = np.zeros((1 + len(model_nums), 3))
-                if msg.msg_type == proto.ServerMessageType.SPAWNBASELINE and msg.model_num in model_nums:
-                    entity_num_to_model_num[msg.entity_num] = msg.model_num
-                if (msg.msg_type in (proto.ServerMessageType.UPDATE, proto.ServerMessageType.SPAWNBASELINE)  and
-                    (msg.entity_num == 1 or msg.entity_num in entity_num_to_model_num)):
-                    if msg.entity_num == 1:
-                        idx = 0
-                    else:
-                        idx = model_num_idx[entity_num_to_model_num[msg.entity_num]]
-                    pos[idx] = self._patch_vec(pos[idx], msg.origin)
-                elif msg.msg_type == proto.ServerMessageType.TIME:
-                    if time is not None and all(x is not None for x in pos):
-                        yield view_angle, copy.copy(pos), time
-                    time = msg.time
-
-    def get_view_at_time(self, t):
-        all_pos = self._pos_interp(t)
-        return self._view_angle_interp(t), all_pos[0], all_pos[1:]
+    def change_speed(self, inc):
+        self.timescale *= 1.1 ** inc
+        logging.info("Timescale set to %.2f", self.timescale)
 
 
 class Renderer:
@@ -224,6 +167,9 @@ class Renderer:
         self._lightmap_image, self._lightmap_texcoords = make_full_lightmap(self._bsp_file)
         self._lightmap_image = np.stack([self._lightmap_image] * 3, axis=2)
         self._face_coords = get_face_coords(self._bsp_file)
+        self._first_person = False
+        self._timer = Timer()
+        self._demo_offsets = np.zeros((len(demo_views),), dtype=np.float32)
         
     def resize(self, width, height):
         glViewport(0, 0, width, height)
@@ -232,6 +178,38 @@ class Renderer:
         gluPerspective(60.0, float(width) / height, 10., 20000.)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
+
+    def _draw_speed(self):
+        delta_t = 0.05
+        current_time = self._get_time()
+        _, p1, _ = self._demo_views[0].get_view_at_time(current_time)
+        _, p2, _ = self._demo_views[0].get_view_at_time(current_time + delta_t)
+
+        p1[2] = p2[2] - 0.
+        speed = np.linalg.norm(p1 - p2) / delta_t
+        s = "Speed: {:.1f}".format(speed)
+        print(s)
+
+    def _sync_demos_to_reference(self):
+        current_time = self._get_time()
+        _, reference_pos, _ = self._demo_views[0].get_view_at_time(current_time)
+        reference_pos[2] = 0.
+
+        for idx, dv in enumerate(self._demo_views):
+            if idx == 0:
+                continue
+            for t in np.arange(0, dv.end_time, 0.2):
+                _, pos, _ = dv.get_view_at_time(t)
+                pos[2] = 0.
+                if np.linalg.norm(pos - reference_pos) < REFERENCE_RADIUS:
+                    self._demo_offsets[idx] = t - current_time
+                    break
+            for t in np.arange(t - 0.2, t, 0.02):
+                _, pos, _ = dv.get_view_at_time(t)
+                pos[2] = 0.
+                if np.linalg.norm(pos - reference_pos) < REFERENCE_RADIUS:
+                    self._demo_offsets[idx] = t - current_time
+                    break
 
     def _setup_textures(self):
         self._lightmap_texture_id = glGenTextures(1)
@@ -312,7 +290,7 @@ class Renderer:
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, ADT.arrayByteCount(index_array), index_array, GL_STATIC_DRAW)
 
     def _get_time(self):
-        return (time.perf_counter() - self._game_start_time)
+        return self._timer.time
 
     def _draw_bsp(self):
         glEnable(GL_TEXTURE_2D)
@@ -325,40 +303,53 @@ class Renderer:
             end_idx, n = self._face_to_idx[m.first_face_idx + m.num_faces - 1]
             end_idx += n
             glPushMatrix()
-            #print(idx, model_pos[idx])
             glTranslate(*model_pos[idx])
             glDrawElements(GL_TRIANGLES, end_idx - start_idx, GL_UNSIGNED_INT, ctypes.c_void_p(4 * start_idx))
             glPopMatrix()
+
+    def _draw_circle(self):
+        glBegin(GL_TRIANGLE_FAN)
+        for theta in np.arange(0, 1, 0.05) * 2 * np.pi:
+            glVertex3f(np.sin(theta), np.cos(theta), 0.)
+        glEnd()
+
+    def _draw_cross(self):
+        glBegin(GL_LINES)
+        glVertex3f(-1, 0, 0)
+        glVertex3f(1, 0, 0)
+        glVertex3f(0, -1, 0)
+        glVertex3f(0, +1, 0)
+        glVertex3f(0, 0, -1)
+        glVertex3f(0, 0, +1)
+        glEnd()
 
     def _show_demo_views(self):
         glPushAttrib(GL_ENABLE_BIT)
         glDisable(GL_TEXTURE_2D)
         glDisable(GL_DEPTH_TEST)
         glMatrixMode(GL_MODELVIEW)
+        current_time = self._get_time()
 
-        for idx, demo_view in enumerate(self._demo_views[1:]):
+        for idx, demo_view in enumerate(self._demo_views):
+            if self._first_person and idx == 0:
+                continue
             #glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
             glEnable(GL_BLEND)
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-            if idx == 0:
-                glColor4f(1, 1, 0, 1.)
-            else:
-                glColor4f(1, 0, 0, 0.05)
             try:
-                view_angle, pos, _ = demo_view.get_view_at_time(self._get_time())
+                view_angle, pos, _ = demo_view.get_view_at_time(current_time + self._demo_offsets[idx])
             except StopIteration:
                 continue
             glPushMatrix()
             glTranslate(*pos)
-            glScalef(30, 30, 30);
-            glBegin(GL_TRIANGLE_FAN)
-            for theta in np.arange(0, 1, 0.25) * 2 * np.pi:
-                glVertex3f(np.sin(theta), np.cos(theta), 0.)
-            for theta in np.arange(0, 1, 0.25) * 2 * np.pi:
-                glVertex3f(np.sin(theta),  0., np.cos(theta))
-            for theta in np.arange(0, 1, 0.25) * 2 * np.pi:
-                glVertex3f(0., np.sin(theta), np.cos(theta))
-            glEnd()
+            if idx == 0:
+                glColor4f(1, 1, 0, 0.2)
+                glScalef(*([REFERENCE_RADIUS] * 3))
+                self._draw_circle()
+            else:
+                glColor4f(1, 0, 0, 0.5)
+                glScalef(30, 30, 30);
+                self._draw_cross()
             glPopMatrix()
 
         glPopAttrib()
@@ -380,13 +371,15 @@ class Renderer:
         glRotatef (-90,  1, 0, 0)
         glRotatef (90,  0, 0, 1)
 
-        self._set_view_from_demo()
-        #glRotatef(90, 0, -1, 0)
-        #glTranslate(*-(self._centre + [0, 0, 3000]))
+        if self._first_person:
+            self._set_view_from_demo()
+        else:
+            glRotatef(90, 0, -1, 0)
+            glTranslate(*-(self._centre + [0, 0, 3000]))
 
         self._draw_bsp()
-
         self._show_demo_views()
+        self._draw_speed()
 
     def run(self):
         self._fps_display = FpsDisplay()
@@ -408,14 +401,27 @@ class Renderer:
                     return
                 if event.type == KEYUP and event.key == K_ESCAPE:
                     return                
+                if event.type == KEYUP and event.key == ord(' '):
+                    self._timer.paused = not self._timer.paused
+                    if self._timer.paused:
+                        print("Paused at {:.2f}".format(self._get_time()))
+                if event.type == KEYUP and event.key == ord('f'):
+                    self._first_person = not self._first_person
                 if event.type == KEYUP and event.key == ord('n'):
-                    self._game_start_time += 1.0
+                    self._timer.shift(-1)
                 if event.type == KEYUP and event.key == ord('m'):
-                    self._game_start_time -= 1.0
+                    self._timer.shift(1)
+                if event.type == KEYUP and event.key == ord('j'):
+                    self._timer.change_speed(-1)
+                if event.type == KEYUP and event.key == ord('k'):
+                    self._timer.change_speed(1)
+                if event.type == KEYUP and event.key == ord('x'):
+                    self._sync_demos_to_reference()
             self._draw_frame()
             pygame.display.flip()
 
             x += 1.
+            self._timer.update()
 
 
 if __name__ == "__main__":
@@ -432,7 +438,15 @@ if __name__ == "__main__":
 
     fs = pak.Filesystem(sys.argv[1])
 
-    demo_views = [DemoView(fname) for fname in sys.argv[2:]]
+    def load_dv(fname, fetch_model_positions):
+        try:
+            dv = demo.DemoView(fname, fetch_model_positions)
+        except demo.NoServerInfoInDemo:
+            return None
+        return dv
+
+    demo_views = [load_dv(fname, (idx == 0)) for idx, fname in enumerate(sys.argv[2:])]
+    demo_views = [x for x in demo_views if x is not None]
     map_name = demo_views[0].map_name
     demo_views = [dv for dv in demo_views if dv.map_name == map_name]
     bsp_file = bsp.BspFile(io.BytesIO(fs[demo_views[0].map_name]))

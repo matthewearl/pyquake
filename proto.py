@@ -662,25 +662,28 @@ class ServerMessageParticle(ServerMessage):
 
 @_register_server_message
 class ServerMessageTempEntity(ServerMessage):
-    field_names = ('temp_entity_type', 'origin', 'end', 'color_start', 'color_length')
+    field_names = ('temp_entity_type', 'entity_num', 'origin', 'end', 'color_start', 'color_length')
     msg_type = ServerMessageType.TEMP_ENTITY
 
     @classmethod
     def parse(cls, m):
         temp_entity_type, m = TempEntityTypes(m[0]), m[1:]
-        origin, m = cls._parse_coords(m)
 
         if temp_entity_type in (TempEntityTypes.LIGHTNING1, TempEntityTypes.LIGHTNING2, TempEntityTypes.BEAM):
+            (entity_num,), m = cls._parse_struct("<H", m)
+            origin, m = cls._parse_coords(m)
             end, m = cls._parse_coords(m)
         else:
+            origin, m = cls._parse_coords(m)
             end = None
+            entity_num = None
 
         if temp_entity_type == TempEntityTypes.EXPLOSION2:
             color_start, color_length, m = m[0], m[1], m[2:]
         else:
             color_start, color_length = None, None
 
-        return cls(temp_entity_type, origin, end, color_start, color_length), m
+        return cls(temp_entity_type, entity_num, origin, end, color_start, color_length), m
 
 
 @_register_server_message
