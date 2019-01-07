@@ -199,7 +199,7 @@ class ServerMessage:
         if b'\0' not in m:
             raise MalformedNetworkData('Null terminator not found')
         idx = m.index(b'\0')
-        return m[:idx].decode('ascii'), m[idx + 1:]
+        return m[:idx].decode('latin'), m[idx + 1:]
 
     @classmethod
     def _parse_coord(cls, m):
@@ -669,7 +669,8 @@ class ServerMessageTempEntity(ServerMessage):
     def parse(cls, m):
         temp_entity_type, m = TempEntityTypes(m[0]), m[1:]
 
-        if temp_entity_type in (TempEntityTypes.LIGHTNING1, TempEntityTypes.LIGHTNING2, TempEntityTypes.BEAM):
+        if temp_entity_type in (TempEntityTypes.LIGHTNING1, TempEntityTypes.LIGHTNING2, TempEntityTypes.LIGHTNING3,
+                                TempEntityTypes.BEAM):
             (entity_num,), m = cls._parse_struct("<H", m)
             origin, m = cls._parse_coords(m)
             end, m = cls._parse_coords(m)

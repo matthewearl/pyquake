@@ -34,7 +34,7 @@ import pickle
 import numpy as np
 import scipy.interpolate
 
-import proto
+from . import proto
 
 
 class NoServerInfoInDemo(Exception):
@@ -92,7 +92,7 @@ class DemoView:
     def _view_gen(self, demo_file_name, fetch_model_positions):
         """Generate view angles, player positions, and map entity positions.
 
-        Angles/positions are genrated between the first server info message and the intermission message.
+        Angles/positions are generated between the first server info message and the intermission message.
 
         """
         prev_t = None

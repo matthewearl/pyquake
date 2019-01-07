@@ -31,7 +31,7 @@ import struct
 
 import numpy as np
 
-import boxpack
+from . import boxpack
 
 
 Face = collections.namedtuple('Face', ('edge_list_idx', 'num_edges', 'texinfo_id', 'lightmap_offset'))

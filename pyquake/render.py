@@ -31,8 +31,8 @@ import numpy as np
 import OpenGL.GL.shaders
 import pygame
 
-import boxpack
-import demo
+from . import boxpack
+from . import demo
 
 
 REFERENCE_RADIUS = 100
