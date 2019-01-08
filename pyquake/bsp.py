@@ -26,17 +26,13 @@ __all__ = (
 
 import collections
 import logging
-import random
 import struct
-
-import numpy as np
-
-from . import boxpack
 
 
 Face = collections.namedtuple('Face', ('edge_list_idx', 'num_edges', 'texinfo_id', 'lightmap_offset'))
 TexInfo = collections.namedtuple('TexInfo', ('vec_s', 'dist_s', 'vec_t', 'dist_t'))
 Model = collections.namedtuple('Model', ('first_face_idx', 'num_faces'))
+Texture = collections.namedtuple('Texture', ('name', 'width', 'height', 'data'))
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
 
@@ -51,6 +47,13 @@ class BspFile:
         if len(b) < n:
             raise MalformedBspFile("File ended unexpectedly")
         return b
+
+    def _read_struct(self, f, struct_fmt, post_func=None):
+        size = struct.calcsize(struct_fmt)
+        out = struct.unpack(struct_fmt, self._read(f, size))
+        if post_func is not None:
+            out = post_func(out)
+        return out
 
     def _read_lump(self, f, dir_entry, struct_fmt, post_func=None):
         size = struct.calcsize(struct_fmt)
@@ -67,6 +70,30 @@ class BspFile:
         size = struct.calcsize(fmt)
         f.seek(4 + size * idx)
         return _DirEntry(*struct.unpack(fmt, self._read(f, size)))
+
+    def _read_texture(self, f, tex_offset):
+        f.seek(tex_offset)
+        name, width, height, *data_offsets = self._read_struct(f, "<16sLL4L")
+
+        if width % 16 != 0 or height % 16 != 0:
+            raise MalformedBspFile(f'Texture has invalid dimensions: {width} x {height}')
+
+        offset = 40
+        data = []
+        for i in range(4):
+            if offset != data_offsets[i]:
+                raise MalformedBspFile(f'Data offset is {data_offsets[i]} expected {offset}')
+            mip_size = (width * height) >> (2 * i)
+            data.append(self._read(f, mip_size))
+            offset += mip_size
+        return Texture(name, width, height, data)
+
+    def _read_textures(self, f, texture_dir_entry):
+        f.seek(texture_dir_entry.offset)
+        num_textures, = self._read_struct(f, "<L")
+        logging.debug('Loading %s textures', num_textures)
+        tex_offsets = [self._read_struct(f, "<L")[0] for i in range(num_textures)]
+        return [self._read_texture(f, texture_dir_entry.offset + offs) for offs in tex_offsets]
 
     def __init__(self, f):
         version, = struct.unpack("<I", self._read(f, 4))
@@ -103,6 +130,10 @@ class BspFile:
                        num_faces):
             return Model(first_face_idx, num_faces)
         self.models = self._read_lump(f, self._read_dir_entry(f, 14), "<ffffffffflllllll", read_model)
+
+        logging.debug("Reading textures")
+        texture_dir_entry = self._read_dir_entry(f, 2)
+        self.textures = self._read_textures(f, texture_dir_entry)
 
 
 if __name__ == "__main__":
