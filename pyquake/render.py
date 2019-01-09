@@ -48,36 +48,22 @@ COLOR_CYCLE = [
 ]
 
 
-def iter_face_verts(bsp_file, face_idx):
-    face = bsp_file.faces[face_idx]
-    for edge_id in bsp_file.edge_list[face.edge_list_idx:face.edge_list_idx + face.num_edges]:
-        if edge_id < 0:
-            v = bsp_file.edges[-edge_id][1]
-        else:
-            v = bsp_file.edges[edge_id][0]
-        yield bsp_file.vertices[v]
-
-
-def face_has_lightmap(bsp_file, face_idx):
-    face = bsp_file.faces[face_idx]
+def face_has_lightmap(bsp, face_idx):
+    face = bsp.faces[face_idx]
     return face.lightmap_offset != -1
 
 
-def extract_lightmap_texture(bsp_file, face_idx):
-    face = bsp_file.faces[face_idx]
+def extract_lightmap_texture(bsp, face_idx):
+    face = bsp.faces[face_idx]
 
-    tex_info = bsp_file.texinfo[face.texinfo_id]
-
-    tex_coords = np.array([[np.dot(v, tex_info.vec_s) + tex_info.dist_s,
-                               np.dot(v, tex_info.vec_t) + tex_info.dist_t]
-                                    for v in iter_face_verts(bsp_file, face_idx)])
+    tex_coords = np.array(list(bsp.iter_face_tex_coords(face_idx)))
 
     mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
     maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
 
     size = (maxs - mins) + 1
 
-    lightmap = np.array(list(bsp_file.lightmap[face.lightmap_offset:
+    lightmap = np.array(list(bsp.lightmap[face.lightmap_offset:
                                           face.lightmap_offset + size[0] * size[1]])).reshape((size[1], size[0]))
 
     tex_coords -= mins * 16
@@ -87,11 +73,11 @@ def extract_lightmap_texture(bsp_file, face_idx):
     return lightmap, tex_coords
 
 
-def make_full_lightmap(bsp_file, lightmap_size=(512, 512)):
+def make_full_lightmap(bsp, lightmap_size=(512, 512)):
     logging.info("Making lightmap")
-    lightmaps = {face_idx: extract_lightmap_texture(bsp_file, face_idx)
-                    for face_idx in range(len(bsp_file.faces))
-                    if face_has_lightmap(bsp_file, face_idx)}
+    lightmaps = {face_idx: extract_lightmap_texture(bsp, face_idx)
+                    for face_idx in range(len(bsp.faces))
+                    if face_has_lightmap(bsp, face_idx)}
 
     lightmaps = dict(reversed(sorted(lightmaps.items(), key=lambda x: x[1][0].shape[0] * x[1][0].shape[1])))
 
@@ -110,19 +96,9 @@ def make_full_lightmap(bsp_file, lightmap_size=(512, 512)):
     return lightmap_image, tex_coords
 
 
-def iter_face_verts(bsp_file, face_idx):
-    face = bsp_file.faces[face_idx]
-    for edge_id in bsp_file.edge_list[face.edge_list_idx:face.edge_list_idx + face.num_edges]:
-        if edge_id < 0:
-            v = bsp_file.edges[-edge_id][1]
-        else:
-            v = bsp_file.edges[edge_id][0]
-        yield bsp_file.vertices[v]
-
-
-def get_face_coords(bsp_file):
-    return {face_idx: np.array([v for v in iter_face_verts(bsp_file, face_idx)])
-                for face_idx in range(len(bsp_file.faces))}
+def get_face_coords(bsp):
+    return {face_idx: np.array([v for v in bsp.iter_face_verts(face_idx)])
+                for face_idx in range(len(bsp.faces))}
 
 class FpsDisplay:
     def __init__(self):
@@ -160,13 +136,13 @@ class Timer:
 
 
 class Renderer:
-    def __init__(self, bsp_file, demo_views):
-        self._bsp_file = bsp_file
-        self._bsp_model_origins = np.zeros((len(bsp_file.models), 3))
+    def __init__(self, bsp, demo_views):
+        self._bsp = bsp
+        self._bsp_model_origins = np.zeros((len(bsp.models), 3))
         self._demo_views = demo_views
-        self._lightmap_image, self._lightmap_texcoords = make_full_lightmap(self._bsp_file)
+        self._lightmap_image, self._lightmap_texcoords = make_full_lightmap(self._bsp)
         self._lightmap_image = np.stack([self._lightmap_image] * 3, axis=2)
-        self._face_coords = get_face_coords(self._bsp_file)
+        self._face_coords = get_face_coords(self._bsp)
         self._first_person = False
         self._timer = Timer()
         self._demo_offsets = np.zeros((len(demo_views),), dtype=np.float32)
@@ -222,16 +198,16 @@ class Renderer:
         glTexImage2Df(GL_TEXTURE_2D, 0, 3, 0, GL_RGB, self._lightmap_image / 255.)
 
     def _setup_buffer_objects(self):
-        vertex_array = [v for face_idx in range(len(self._bsp_file.faces))
+        vertex_array = [v for face_idx in range(len(self._bsp.faces))
                           if face_idx in self._lightmap_texcoords
                           for v in self._face_coords[face_idx]]
-        texcoord_array = [v for face_idx in range(len(self._bsp_file.faces))
+        texcoord_array = [v for face_idx in range(len(self._bsp.faces))
                             if face_idx in self._lightmap_texcoords
                             for v in self._lightmap_texcoords[face_idx]]
-        model_faces = {i for m in self._bsp_file.models[1:]
+        model_faces = {i for m in self._bsp.models[1:]
                          for i in range(m.first_face_idx, m.first_face_idx + m.num_faces)}
         color_array = [[0, 1, 0] if face_idx in model_faces else [1, 1, 1]
-                         for face_idx in range(len(self._bsp_file.faces))
+                         for face_idx in range(len(self._bsp.faces))
                          if face_idx in self._lightmap_texcoords
                          for v in self._lightmap_texcoords[face_idx]]
 
@@ -239,7 +215,7 @@ class Renderer:
         # produce all of the models in the map.
         vert_idx = 0
         index_array = []
-        for face_idx in range(len(self._bsp_file.faces)):
+        for face_idx in range(len(self._bsp.faces)):
             if face_idx in self._lightmap_texcoords:
                 num_verts_in_face = len(self._face_coords[face_idx])
                 for i in range(1, num_verts_in_face - 1):
@@ -250,7 +226,7 @@ class Renderer:
         # to render this face.
         vert_idx = 0
         self._face_to_idx = {}
-        for face_idx in range(len(self._bsp_file.faces)):
+        for face_idx in range(len(self._bsp.faces)):
             if face_idx in self._lightmap_texcoords:
                 num_verts_in_face = len(self._face_coords[face_idx])
                 self._face_to_idx[face_idx] = (vert_idx, 3 * (num_verts_in_face - 2))
@@ -298,7 +274,7 @@ class Renderer:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
         _, _, model_pos = self._demo_views[0].get_view_at_time(self._get_time())
 
-        for idx, m in enumerate(self._bsp_file.models):
+        for idx, m in enumerate(self._bsp.models):
             start_idx, _ = self._face_to_idx[m.first_face_idx]
             end_idx, n = self._face_to_idx[m.first_face_idx + m.num_faces - 1]
             end_idx += n
@@ -392,7 +368,7 @@ class Renderer:
         glEnable(GL_DEPTH_TEST)
         self.resize(*SCREEN_SIZE)
 
-        self._centre = np.array(self._bsp_file.vertices).mean(axis=0)
+        self._centre = np.array(self._bsp.vertices).mean(axis=0)
 
         x = 0.
         while True:
@@ -423,14 +399,13 @@ class Renderer:
             x += 1.
             self._timer.update()
 
-
-if __name__ == "__main__":
+def demo_viewer_main():
     import io
     import sys
     import logging
 
-    import bsp
-    import pak
+    from .bsp import Bsp
+    from . import pak
 
     root_logger = logging.getLogger()
     root_logger.addHandler(logging.StreamHandler())
@@ -449,9 +424,7 @@ if __name__ == "__main__":
     demo_views = [x for x in demo_views if x is not None]
     map_name = demo_views[0].map_name
     demo_views = [dv for dv in demo_views if dv.map_name == map_name]
-    bsp_file = bsp.BspFile(io.BytesIO(fs[demo_views[0].map_name]))
+    bsp = Bsp(io.BytesIO(fs[demo_views[0].map_name]))
 
-    renderer = Renderer(bsp_file, demo_views)
+    renderer = Renderer(bsp, demo_views)
     renderer.run()
-
-

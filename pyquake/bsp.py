@@ -19,10 +19,12 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 __all__ = (
-    'BspFile',
+    'Bsp',
     'MalformedBspFile',
 )
 
+
+import numpy as np
 
 import collections
 import logging
@@ -41,7 +43,8 @@ class MalformedBspFile(Exception):
     pass
 
 
-class BspFile:
+class _BspFile:
+    """A BSP file parser, and interface to the information directly contained within."""
     def _read(self, f, n):
         b = f.read(n)
         if len(b) < n:
@@ -74,6 +77,7 @@ class BspFile:
     def _read_texture(self, f, tex_offset):
         f.seek(tex_offset)
         name, width, height, *data_offsets = self._read_struct(f, "<16sLL4L")
+        name = name[:name.index(b'\0')].decode('ascii')
 
         if width % 16 != 0 or height % 16 != 0:
             raise MalformedBspFile(f'Texture has invalid dimensions: {width} x {height}')
@@ -134,6 +138,27 @@ class BspFile:
         logging.debug("Reading textures")
         texture_dir_entry = self._read_dir_entry(f, 2)
         self.textures = self._read_textures(f, texture_dir_entry)
+
+
+class Bsp(_BspFile):
+    """An interface to a BSP file, with added convenience methods"""
+
+    def iter_face_vert_indices(self, face_idx):
+        face = self.faces[face_idx]
+        for edge_id in self.edge_list[face.edge_list_idx:face.edge_list_idx + face.num_edges]:
+            if edge_id < 0:
+                v = self.edges[-edge_id][1]
+            else:
+                v = self.edges[edge_id][0]
+            yield v
+
+    def iter_face_verts(self, face_idx):
+        return (self.vertices[idx] for idx in self.iter_face_vert_indices(face_idx))
+
+    def iter_face_tex_coords(self, face_idx):
+        tex_info = self.texinfo[self.faces[face_idx].texinfo_id]
+        return [[np.dot(v, tex_info.vec_s) + tex_info.dist_s, np.dot(v, tex_info.vec_t) + tex_info.dist_t]
+                    for v in self.iter_face_verts(face_idx)]
 
 
 if __name__ == "__main__":
