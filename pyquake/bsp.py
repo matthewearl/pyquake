@@ -32,7 +32,7 @@ import struct
 
 
 Face = collections.namedtuple('Face', ('edge_list_idx', 'num_edges', 'texinfo_id', 'lightmap_offset'))
-TexInfo = collections.namedtuple('TexInfo', ('vec_s', 'dist_s', 'vec_t', 'dist_t'))
+TexInfo = collections.namedtuple('TexInfo', ('vec_s', 'dist_s', 'vec_t', 'dist_t', 'texture_id', 'animated'))
 Model = collections.namedtuple('Model', ('first_face_idx', 'num_faces'))
 Texture = collections.namedtuple('Texture', ('name', 'width', 'height', 'data'))
 
@@ -120,8 +120,8 @@ class _BspFile:
         self.faces = self._read_lump(f, self._read_dir_entry(f, 7), "<HHLHHBBBBl", read_face)
 
         logging.debug("Reading texinfo")
-        def read_texinfo(vs1, vs2, vs3, ds, vt1, vt2, vt3, dt, miptex, flags):
-            return TexInfo((vs1, vs2, vs3), ds, (vt1, vt2, vt3), dt)
+        def read_texinfo(vs1, vs2, vs3, ds, vt1, vt2, vt3, dt, texture_id, flags):
+            return TexInfo((vs1, vs2, vs3), ds, (vt1, vt2, vt3), dt, texture_id, flags)
         self.texinfo = self._read_lump(f, self._read_dir_entry(f, 6), "<ffffffffLL", read_texinfo)
 
         logging.debug("Reading lightmap")
