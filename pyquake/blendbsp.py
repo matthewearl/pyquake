@@ -16,30 +16,6 @@ _EXTRA_BRIGHT_TEXTURES = [
 ]
 
 
-def _get_face_vert_indices(bsp, face_idx):
-    face = bsp.faces[face_idx]
-    for edge_id in bsp.edge_list[face.edge_list_idx:face.edge_list_idx + face.num_edges]:
-        if edge_id < 0:
-            v = bsp.edges[-edge_id][1]
-        else:
-            v = bsp.edges[edge_id][0]
-        yield v
-
-
-def _add_mesh_obj(mesh, obj_name):
-    scn = bpy.context.scene
-
-    for o in scn.objects:
-        o.select = False
-
-    nobj = bpy.data.objects.new(obj_name, mesh)
-    scn.objects.link(nobj)
-    nobj.select = True
-
-    if scn.objects.active is None or scn.objects.active.mode == 'OBJECT':
-        scn.objects.active = nobj
-
-
 def _load_material(pal, texture):
     # Read the image from the BSP texture
     im_indices = np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))
