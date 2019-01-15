@@ -21,6 +21,7 @@
 __all__ = (
     'Bsp',
     'MalformedBspFile',
+    'get_tex_coords',
 )
 
 
@@ -157,8 +158,11 @@ class Bsp(_BspFile):
 
     def iter_face_tex_coords(self, face_idx):
         tex_info = self.texinfo[self.faces[face_idx].texinfo_id]
-        return [[np.dot(v, tex_info.vec_s) + tex_info.dist_s, np.dot(v, tex_info.vec_t) + tex_info.dist_t]
-                    for v in self.iter_face_verts(face_idx)]
+        return [get_tex_coords(tex_info, v) for v in self.iter_face_verts(face_idx)]
+
+
+def get_tex_coords(tex_info, vert):
+    return [np.dot(vert, tex_info.vec_s) + tex_info.dist_s, np.dot(vert, tex_info.vec_t) + tex_info.dist_t]
 
 
 if __name__ == "__main__":
