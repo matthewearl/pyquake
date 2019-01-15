@@ -9,9 +9,9 @@ from .bsp import Bsp
 from . import pak
 
 _EXTRA_BRIGHT_TEXTURES = [
-    'tlight02',
+    #'tlight02',
     #'tlight07',
-    #'tlight11',
+    'tlight11',
     #'tlight01',
 ]
 
@@ -27,6 +27,52 @@ def _texture_to_array(pal, texture):
     array_im = 255 * (array_im / 255.) ** 0.8
 
     return array_im, fullbright
+
+
+def _clear_node_tree(nodes, links):
+    while nodes:
+        nodes.remove(nodes[0])
+    while links:
+        links.remove(links[0])
+
+
+def _setup_diffuse_material(nodes, links, im):
+    _clear_node_tree(nodes, links)
+    texture_node = nodes.new('ShaderNodeTexImage')
+    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+
+    texture_node.image = im
+    texture_node.interpolation = 'Closest'
+    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
+    links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
+
+
+def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
+    _clear_node_tree(nodes, links)
+
+    texture_node = nodes.new('ShaderNodeTexImage')
+    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+
+    texture_node.image = im
+    texture_node.interpolation = 'Closest'
+
+    add_node = nodes.new('ShaderNodeAddShader')
+    glow_texture_node = nodes.new('ShaderNodeTexImage')
+    emission_node = nodes.new('ShaderNodeEmission')
+
+    glow_texture_node.image = glow_im
+    glow_texture_node.interpolation = 'Closest'
+
+    if extra_bright:
+        emission_node.inputs['Strength'].default_value = 100.
+
+    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
+    links.new(emission_node.inputs['Color'], glow_texture_node.outputs['Color'])
+    links.new(add_node.inputs[0], diffuse_node.outputs['BSDF'])
+    links.new(add_node.inputs[1], emission_node.outputs['Emission'])
+    links.new(output_node.inputs['Surface'], add_node.outputs['Shader'])
 
 
 def _load_material(pal, texture):
@@ -50,35 +96,10 @@ def _load_material(pal, texture):
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
 
-    while nodes:
-        nodes.remove(nodes[0])
-    while links:
-        links.remove(links[0])
-    
-    texture_node = nodes.new('ShaderNodeTexImage')
-    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
-    output_node = nodes.new('ShaderNodeOutputMaterial')
-
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
-
     if fullbright is not None:
-        add_node = nodes.new('ShaderNodeAddShader')
-        glow_texture_node = nodes.new('ShaderNodeTexImage')
-        emission_node = nodes.new('ShaderNodeEmission')
-
-        glow_texture_node.image = glow_im
-        glow_texture_node.interpolation = 'Closest'
-        links.new(emission_node.inputs['Color'], glow_texture_node.outputs['Color'])
-        links.new(add_node.inputs[0], diffuse_node.outputs['BSDF'])
-        links.new(add_node.inputs[1], emission_node.outputs['Emission'])
-        links.new(output_node.inputs['Surface'], add_node.outputs['Shader'])
-
-        if texture.name in _EXTRA_BRIGHT_TEXTURES:
-            emission_node.inputs['Strength'].default_value = 100.
+        _setup_fullbright_material(nodes, links, im, glow_im, texture.name in _EXTRA_BRIGHT_TEXTURES)
     else:
-        links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
+        _setup_diffuse_material(nodes, links, im)
 
 
 def _set_uvs(bsp, mesh, face_indices):
