@@ -60,6 +60,7 @@ def _load_material(pal, texture):
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
     texture_node.image = im
+    texture_node.interpolation = 'Closest'
     links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
 
     if fullbright is not None:
@@ -68,6 +69,7 @@ def _load_material(pal, texture):
         emission_node = nodes.new('ShaderNodeEmission')
 
         glow_texture_node.image = glow_im
+        glow_texture_node.interpolation = 'Closest'
         links.new(emission_node.inputs['Color'], glow_texture_node.outputs['Color'])
         links.new(add_node.inputs[0], diffuse_node.outputs['BSDF'])
         links.new(add_node.inputs[1], emission_node.outputs['Emission'])
@@ -251,7 +253,6 @@ def load_bsp(pak_root, map_name, do_materials=True):
     fname = f'maps/{map_name}.bsp'
     bsp = Bsp(io.BytesIO(fs[fname]))
     pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 256
-    pal = np.concatenate([np.zeros((224, 3)), np.ones((32, 3))])
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
     if do_materials:
