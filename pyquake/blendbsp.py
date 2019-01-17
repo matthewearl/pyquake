@@ -5,8 +5,9 @@ import bpy
 import bmesh
 import numpy as np
 
-from .bsp import Bsp
+from .bsp import Bsp, get_tex_coords
 from . import pak
+
 
 _EXTRA_BRIGHT_TEXTURES = [
     #'tlight02',
@@ -14,6 +15,9 @@ _EXTRA_BRIGHT_TEXTURES = [
     'tlight11',
     #'tlight01',
 ]
+
+
+_FULLBRIGHT_OBJECT_OVERLAY = True
 
 
 def _texture_to_array(pal, texture):
@@ -29,15 +33,7 @@ def _texture_to_array(pal, texture):
     return array_im, fullbright
 
 
-def _clear_node_tree(nodes, links):
-    while nodes:
-        nodes.remove(nodes[0])
-    while links:
-        links.remove(links[0])
-
-
 def _setup_diffuse_material(nodes, links, im):
-    _clear_node_tree(nodes, links)
     texture_node = nodes.new('ShaderNodeTexImage')
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
@@ -48,9 +44,44 @@ def _setup_diffuse_material(nodes, links, im):
     links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
 
 
-def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
-    _clear_node_tree(nodes, links)
+def _setup_transparent_fullbright(nodes, links, im, glow_im, extra_bright=False):
+    texture_node = nodes.new('ShaderNodeTexImage')
+    emission_node = nodes.new('ShaderNodeEmission')
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+    glow_texture_node = nodes.new('ShaderNodeTexImage')
+    mix_node = nodes.new('ShaderNodeMixShader')
+    transparent_node = nodes.new('ShaderNodeBsdfTransparent')
 
+    texture_node.image = im
+    glow_texture_node.image = glow_im
+
+    if extra_bright:
+        emission_node.inputs['Strength'].default_value = 100.
+
+    links.new(emission_node.inputs['Color'], texture_node.outputs['Color'])
+    links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
+    links.new(mix_node.inputs[1], transparent_node.outputs['BSDF'])
+    links.new(mix_node.inputs[2], emission_node.outputs['Emission'])
+    links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
+
+def _setup_transparent_diffuse(nodes, links, im, glow_im):
+    texture_node = nodes.new('ShaderNodeTexImage')
+    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+    glow_texture_node = nodes.new('ShaderNodeTexImage')
+    mix_node = nodes.new('ShaderNodeMixShader')
+    transparent_node = nodes.new('ShaderNodeBsdfTransparent')
+
+    texture_node.image = im
+    glow_texture_node.image = glow_im
+
+    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
+    links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
+    links.new(mix_node.inputs[1], diffuse_node.outputs['BSDF'])
+    links.new(mix_node.inputs[2], transparent_node.outputs['BSDF'])
+    links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
+
+def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
     texture_node = nodes.new('ShaderNodeTexImage')
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
@@ -75,60 +106,100 @@ def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
     links.new(output_node.inputs['Surface'], add_node.outputs['Shader'])
 
 
-def _load_material(pal, texture):
-    # Read the image from the BSP texture
-    array_im, fullbright = _texture_to_array(pal, texture)
-
-    # Create the image object in blender
-    im = bpy.data.images.new(texture.name, width=texture.width, height=texture.height)
+def _blender_im_from_array(name, array_im):
+    im = bpy.data.images.new(name, width=array_im.shape[1], height=array_im.shape[0])
     im.pixels = np.ravel(array_im)
     im.pack(as_png=True)
+    return im
 
-    if fullbright is not None:
-        # Create the glow image object in blender
-        glow_im = bpy.data.images.new(f'{texture.name}_glow', width=texture.width, height=texture.height)
-        glow_im.pixels = np.ravel(array_im * fullbright[..., None])
-        glow_im.pack(as_png=True)
 
-    # Create the material in blender
-    mat = bpy.data.materials.new(texture.name)
+def _blender_new_mat(name):
+    mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
 
-    if fullbright is not None:
-        _setup_fullbright_material(nodes, links, im, glow_im, texture.name in _EXTRA_BRIGHT_TEXTURES)
+    while nodes:
+        nodes.remove(nodes[0])
+    while links:
+        links.remove(links[0])
+
+    return mat, nodes, links
+
+
+def _load_images(pal, bsp):
+    ims = []
+    fullbright_ims = []
+    for texture_id, texture in enumerate(bsp.textures):
+        array_im, fullbright = _texture_to_array(pal, texture)
+        im = _blender_im_from_array(texture.name, array_im)
+        if fullbright is not None:
+            fullbright_im = _blender_im_from_array(f'{texture.name}_fullbright', array_im * fullbright[..., None])
+        else:
+            fullbright_im = None
+
+        ims.append(im)
+        fullbright_ims.append(fullbright_im)
+
+    return ims, fullbright_ims
+
+
+def _load_material(texture_id, texture, ims, fullbright_ims):
+    im = ims[texture_id]
+    fullbright_im = fullbright_ims[texture_id]
+
+    mat, nodes, links = _blender_new_mat(f'{texture.name}_main')
+
+    if fullbright_im is not None:
+        if _FULLBRIGHT_OBJECT_OVERLAY:
+            _setup_transparent_diffuse(nodes, links, im, fullbright_im)
+        else:
+            _setup_fullbright_material(nodes, links, im, fullbright_im, texture.name in _EXTRA_BRIGHT_TEXTURES)
     else:
         _setup_diffuse_material(nodes, links, im)
 
 
-def _set_uvs(bsp, mesh, face_indices):
+def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
+    im = ims[texture_id]
+    fullbright_im = fullbright_ims[texture_id]
+    if fullbright_im is not None:
+        mat, nodes, links = _blender_new_mat(f'{texture.name}_fullbright')
+        _setup_transparent_fullbright(nodes, links, im, fullbright_im, texture.name in _EXTRA_BRIGHT_TEXTURES)
+
+
+def _set_uvs(mesh, textures, texinfos, vertices, faces):
     mesh.uv_textures.new()
 
     bm = bmesh.new()
     bm.from_mesh(mesh)
     uv_layer = bm.loops.layers.uv[0]
 
-    assert len(bm.faces) == len(face_indices)
-    for bm_face, bsp_face_idx in zip(bm.faces, face_indices):
-        bsp_face = bsp.faces[bsp_face_idx]
-        assert bsp_face.num_edges == len(bm_face.loops)
-
-        texture = bsp.textures[bsp.texinfo[bsp_face.texinfo_id].texture_id]
-        
-        for bm_loop, (s, t) in zip(bm_face.loops, bsp.iter_face_tex_coords(bsp_face_idx)):
+    assert len(bm.faces) == len(faces)
+    assert len(bm.faces) == len(texinfos)
+    assert len(bm.faces) == len(textures)
+    for bm_face, face, texinfo, texture in zip(bm.faces, faces, texinfos, textures):
+        assert len(face) == len(bm_face.loops)
+        for bm_loop, vert_idx in zip(bm_face.loops, face):
+            vert = vertices[vert_idx]
+            s, t = get_tex_coords(texinfo, vert)
             bm_loop[uv_layer].uv = s / texture.width, t / texture.height
 
     bm.to_mesh(mesh)
 
 
-def _apply_materials(bsp, mesh, face_indices):
-    for texture in bsp.textures:
-        mesh.materials.append(bpy.data.materials[texture.name])
+def _apply_materials(bsp, mesh, face_indices, mat_suffix):
+    tex_id_to_mat_idx = {}
+    mat_idx = 0
+    for texture_id, texture in enumerate(bsp.textures):
+        mat_name = f'{texture.name}_{mat_suffix}'
+        if mat_name in bpy.data.materials:
+            mesh.materials.append(bpy.data.materials[mat_name])
+            tex_id_to_mat_idx[texture_id] = mat_idx
+            mat_idx += 1
 
     for mesh_poly, bsp_face_idx in zip(mesh.polygons, face_indices):
         bsp_face = bsp.faces[bsp_face_idx]
-        mesh_poly.material_index = bsp.texinfo[bsp_face.texinfo_id].texture_id
+        mesh_poly.material_index = tex_id_to_mat_idx[bsp.texinfo[bsp_face.texinfo_id].texture_id]
 
 
 def _get_visible_face_indices(bsp):
@@ -178,36 +249,30 @@ def _truncate_face(vert_indices, vertices, normal, plane_dist):
     return new_vert_indices, vertices + new_vertices
 
 
-def _load_fullbright_object(bsp, map_name, pal):
-
-    # Calculate texture colours, fullbright boolean values, bboxes on the fullbrights, and a map from texture ids to
-    # indices into the arrays just created.
-    ims, fullbrights, bboxes, fullbright_ids = [], [], [], []
+def _load_fullbright_object(bsp, map_name, pal, do_materials):
+    # Calculate bounding boxes for regions of full brightness.
+    bbox_ids, bboxes = [], []
     for texture in bsp.textures:
-        im, fullbright = _texture_to_array(pal, texture)
-        if fullbright is not None:
-            fullbright_ids.append(len(fullbrights))
-            fullbrights.append(fullbright)
-            bboxes.append(_get_bbox(fullbright))
-            ims.append(im)
+        _, fullbright_array_im = _texture_to_array(pal, texture)
+        if fullbright_array_im is not None:
+            bbox_ids.append(len(bboxes))
+            bboxes.append(_get_bbox(fullbright_array_im))
         else:
-            fullbright_ids.append(None)
+            bbox_ids.append(None)
 
     # For each fullbright face in the original BSP, create a set of new faces, one for each wrap of the texture image.
     # The new faces bounds the fullbright texels for that particular wrap of the texture
-    new_faces = []
+    new_faces, new_face_indices = [], []
     vertices = bsp.vertices
     for face_idx in _get_visible_face_indices(bsp):
         texinfo = bsp.texinfo[bsp.faces[face_idx].texinfo_id]
         texture_id = texinfo.texture_id
         texture = bsp.textures[texture_id]
-        fullbright_id = fullbright_ids[texture_id]
-        if fullbright_id is None or texture.name not in _EXTRA_BRIGHT_TEXTURES:
+        bbox_id = bbox_ids[texture_id]
+        if bbox_id is None or texture.name not in _EXTRA_BRIGHT_TEXTURES:
             continue
 
-        #im = ims[fullbright_id]
-        #fullbright = fullbrights[fullbright_id]
-        bbox = bboxes[fullbright_id]
+        bbox = bboxes[bbox_id]
 
         tex_size = np.array([texture.width, texture.height])
         vert_indices = list(bsp.iter_face_vert_indices(face_idx))
@@ -241,6 +306,7 @@ def _load_fullbright_object(bsp, map_name, pal):
                 print(f'Created a face with {len(new_vert_indices)} faces. vert count = {len(vertices)}')
                 if new_vert_indices:
                     new_faces.append(new_vert_indices)
+                    new_face_indices.append(face_idx)
 
         break
 
@@ -251,6 +317,12 @@ def _load_fullbright_object(bsp, map_name, pal):
     obj = bpy.data.objects.new(f'{map_name}_fullbright', mesh)
     bpy.context.scene.objects.link(obj)
 
+    if do_materials:
+        texinfos = [bsp.texinfo[bsp.faces[face_idx].texinfo_id] for face_idx in new_face_indices]
+        textures = [bsp.textures[texinfo.texture_id] for texinfo in texinfos]
+        _set_uvs(mesh, textures, texinfos, vertices, new_faces)
+        _apply_materials(bsp, mesh, new_face_indices, 'fullbright')
+
 
 def _load_object(bsp, map_name, do_materials):
     face_indices = _get_visible_face_indices(bsp)
@@ -260,8 +332,10 @@ def _load_object(bsp, map_name, do_materials):
     mesh.from_pydata(bsp.vertices, [], faces)
 
     if do_materials:
-        _set_uvs(bsp, mesh, face_indices)
-        _apply_materials(bsp, mesh, face_indices)
+        texinfos = [bsp.texinfo[bsp.faces[face_idx].texinfo_id] for face_idx in face_indices]
+        textures = [bsp.textures[texinfo.texture_id] for texinfo in texinfos]
+        _set_uvs(mesh, textures, texinfos, bsp.vertices, faces)
+        _apply_materials(bsp, mesh, face_indices, 'main')
 
     mesh.validate()
 
@@ -277,10 +351,20 @@ def load_bsp(pak_root, map_name, do_materials=True):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
     if do_materials:
-        for texture in bsp.textures:
-            _load_material(pal, texture)
+        ims, fullbright_ims = _load_images(pal, bsp)
+
+    if do_materials:
+        for texture_id, texture in enumerate(bsp.textures):
+            _load_material(texture_id, texture, ims, fullbright_ims)
 
     _load_object(bsp, map_name, do_materials)
-    _load_fullbright_object(bsp, map_name, pal)
+
+    if _FULLBRIGHT_OBJECT_OVERLAY:
+        if do_materials:
+            for texture_id, texture in enumerate(bsp.textures):
+                _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
+
+        _load_fullbright_object(bsp, map_name, pal, do_materials)
+
     
     return bsp
