@@ -10,13 +10,14 @@ from . import pak
 
 
 _EXTRA_BRIGHT_TEXTURES = [
-    #'tlight02',
-    #'tlight07',
+    'tlight02',
+    'tlight07',
     'tlight11',
-    #'tlight01',
+    'tlight01',
 ]
 
 
+_ALL_FULLBRIGHT_IN_OVERLAY = True
 _FULLBRIGHT_OBJECT_OVERLAY = True
 
 
@@ -53,7 +54,9 @@ def _setup_transparent_fullbright(nodes, links, im, glow_im, extra_bright=False)
     transparent_node = nodes.new('ShaderNodeBsdfTransparent')
 
     texture_node.image = im
+    texture_node.interpolation = 'Closest'
     glow_texture_node.image = glow_im
+    glow_texture_node.interpolation = 'Closest'
 
     if extra_bright:
         emission_node.inputs['Strength'].default_value = 100.
@@ -73,7 +76,9 @@ def _setup_transparent_diffuse(nodes, links, im, glow_im):
     transparent_node = nodes.new('ShaderNodeBsdfTransparent')
 
     texture_node.image = im
+    texture_node.interpolation = 'Closest'
     glow_texture_node.image = glow_im
+    glow_texture_node.interpolation = 'Closest'
 
     links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
     links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
@@ -93,6 +98,8 @@ def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
     glow_texture_node = nodes.new('ShaderNodeTexImage')
     emission_node = nodes.new('ShaderNodeEmission')
 
+    texture_node.image = im
+    texture_node.interpolation = 'Closest'
     glow_texture_node.image = glow_im
     glow_texture_node.interpolation = 'Closest'
 
@@ -151,10 +158,15 @@ def _load_material(texture_id, texture, ims, fullbright_ims):
     mat, nodes, links = _blender_new_mat(f'{texture.name}_main')
 
     if fullbright_im is not None:
-        if _FULLBRIGHT_OBJECT_OVERLAY:
+        extra_bright = texture.name in _EXTRA_BRIGHT_TEXTURES
+        if _FULLBRIGHT_OBJECT_OVERLAY and (_ALL_FULLBRIGHT_IN_OVERLAY or extra_bright):
             _setup_transparent_diffuse(nodes, links, im, fullbright_im)
         else:
-            _setup_fullbright_material(nodes, links, im, fullbright_im, texture.name in _EXTRA_BRIGHT_TEXTURES)
+            # _setup_fullbright_material(nodes, links, im, fullbright_im, extra_bright)
+            if extra_bright:
+                _setup_fullbright_material(nodes, links, im, fullbright_im, True)
+            else:
+                _setup_diffuse_material(nodes, links, im)
     else:
         _setup_diffuse_material(nodes, links, im)
 
@@ -233,8 +245,6 @@ def _truncate_face(vert_indices, vertices, normal, plane_dist):
         dist = np.dot(vert, normal) - plane_dist
         prev_dist = np.dot(prev_vert, normal) - plane_dist
 
-        print('prev vert', prev_vert, 'vert', vert, 'dist', dist, 'prev_dist', prev_dist)
-
         if (prev_dist >= 0) != (dist >= 0):
             alpha = -dist / (prev_dist - dist)
             new_vert = tuple(alpha * np.array(prev_vert) + (1 - alpha) * np.array(vert))
@@ -269,7 +279,7 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
         texture_id = texinfo.texture_id
         texture = bsp.textures[texture_id]
         bbox_id = bbox_ids[texture_id]
-        if bbox_id is None or texture.name not in _EXTRA_BRIGHT_TEXTURES:
+        if bbox_id is None or (not _ALL_FULLBRIGHT_IN_OVERLAY and texture.name not in _EXTRA_BRIGHT_TEXTURES):
             continue
 
         bbox = bboxes[bbox_id]
@@ -279,16 +289,11 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
         tex_coords = np.array(list(bsp.iter_face_tex_coords(face_idx)))
 
         face_bbox = np.stack([np.min(tex_coords, axis=0), np.max(tex_coords, axis=0)])
-        print('texinfo', texinfo)
-        print('face_bbox', face_bbox)
-        print('bbox', bbox)
-        print('tex_size', tex_size)
         
         # Iterate over each potential wraps of the texture.  Number of wraps is determined using bounding boxes in
         # texture space.
         start_indices = np.ceil((face_bbox[0] - bbox[1]) / tex_size).astype(np.int)
         end_indices = np.ceil((face_bbox[1] - bbox[0]) / tex_size).astype(np.int)
-        print(start_indices, end_indices)
         for t_offset in range(start_indices[1], end_indices[1]):
             for s_offset in range(start_indices[0], end_indices[0]):
                 new_vert_indices = vert_indices
@@ -296,19 +301,12 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
                           (-np.array(texinfo.vec_s), -(s_offset * tex_size[0] + bbox[1, 0] - texinfo.dist_s)),
                           (np.array(texinfo.vec_t), t_offset * tex_size[1] + bbox[0, 1] - texinfo.dist_t),
                           (-np.array(texinfo.vec_t), -(t_offset * tex_size[1] + bbox[1, 1] - texinfo.dist_t))]
-                print('Vertices before truncating\n', np.array([vertices[i] for i in vert_indices]))
                 for n, d in planes:
-                    print(f'Truncating {n} {d}')
                     new_vert_indices, vertices = _truncate_face(new_vert_indices, vertices, n, d)
-                    print('Vertices after truncating\n', np.array([vertices[i] for i in new_vert_indices]))
-                print('--')
-
-                print(f'Created a face with {len(new_vert_indices)} faces. vert count = {len(vertices)}')
                 if new_vert_indices:
                     new_faces.append(new_vert_indices)
                     new_face_indices.append(face_idx)
 
-        break
 
     # Actually make the mash and add it to the scene
     mesh = bpy.data.meshes.new(map_name)
