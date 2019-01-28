@@ -81,13 +81,13 @@ class _BspFile:
         name = name[:name.index(b'\0')].decode('ascii')
 
         if width % 16 != 0 or height % 16 != 0:
-            raise MalformedBspFile(f'Texture has invalid dimensions: {width} x {height}')
+            raise MalformedBspFile('Texture has invalid dimensions: {} x {}'.format(width, height))
 
         offset = 40
         data = []
         for i in range(4):
             if offset != data_offsets[i]:
-                raise MalformedBspFile(f'Data offset is {data_offsets[i]} expected {offset}')
+                raise MalformedBspFile('Data offset is {} expected {}'.format(data_offsets[i], offset))
             mip_size = (width * height) >> (2 * i)
             data.append(self._read(f, mip_size))
             offset += mip_size
