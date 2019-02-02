@@ -25,17 +25,115 @@ __all__ = (
 )
 
 
-import numpy as np
-
 import collections
+import enum
 import logging
 import struct
+from typing import NamedTuple, Tuple
+
+import numpy as np
+
+from . import ent
 
 
-Face = collections.namedtuple('Face', ('edge_list_idx', 'num_edges', 'texinfo_id', 'lightmap_offset'))
-TexInfo = collections.namedtuple('TexInfo', ('vec_s', 'dist_s', 'vec_t', 'dist_t', 'texture_id', 'animated'))
-Model = collections.namedtuple('Model', ('first_face_idx', 'num_faces'))
-Texture = collections.namedtuple('Texture', ('name', 'width', 'height', 'data'))
+class PlaneType(enum.Enum):
+    AXIAL_X = 0
+    AXIAL_Y = 1
+    AXIAL_Z = 2
+    NON_AXIAL_X = 3
+    NON_AXIAL_Y = 4
+    NON_AXIAL_Z = 5
+
+
+class Plane(NamedTuple):
+    normal: Tuple[float, float, float]
+    dist: float
+    plane_type: PlaneType
+
+
+class BBoxShort(NamedTuple):
+    mins: Tuple[int, int, int]
+    maxs: Tuple[int, int, int]
+
+
+class Node(NamedTuple):
+    bsp: "Bsp"
+    plane_id: int
+    front_id: int
+    back_id: int
+    bbox: BBoxShort
+    face_id: int
+    num_faces: int
+
+
+class Leaf(NamedTuple):
+    bsp: "Bsp"
+    contents: int
+    vis_offset: int
+    bbox: BBoxShort
+    face_list_idx: int
+    num_faces: int
+
+
+class Face(NamedTuple):
+    bsp: "Bsp"
+    edge_list_idx: int
+    num_edges: int
+    texinfo_id: int
+    lightmap_offset: int
+
+    @property
+    def vert_indices(self):
+        for edge_id in self.bsp.edge_list[self.edge_list_idx:self.edge_list_idx + self.num_edges]:
+            if edge_id < 0:
+                v = self.bsp.edges[-edge_id][1]
+            else:
+                v = self.bsp.edges[edge_id][0]
+            yield v
+
+    @property
+    def vertices(self):
+        return (self.bsp.vertices[idx] for idx in self.vert_indices)
+
+    @property
+    def tex_coords(self):
+        return [get_tex_coords(self.tex_info, v) for v in self.vertices]
+
+    @property
+    def tex_info(self):
+        return self.bsp.texinfo[self.texinfo_id]
+
+
+class TexInfo(NamedTuple):
+    bsp: "Bsp"
+    vec_s: float
+    dist_s: float
+    vec_t: float
+    dist_t: float
+    texture_id: int
+    flags: int
+
+    @property
+    def texture(self):
+        return bsp.textures[texture_id]
+
+
+class Model(NamedTuple):
+    bsp: "Bsp"
+    first_face_idx: int
+    num_faces: int
+
+    @property
+    def faces(self):
+        return bsp.faces[bsp.first_face_idx:bsp.first_face_idx + num_faces]
+
+
+class Texture(NamedTuple):
+    name: str
+    width: int
+    height: int
+    data: bytes
+    
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
 
@@ -44,7 +142,7 @@ class MalformedBspFile(Exception):
     pass
 
 
-class _BspFile:
+class Bsp:
     """A BSP file parser, and interface to the information directly contained within."""
     def _read(self, f, n):
         b = f.read(n)
@@ -117,12 +215,12 @@ class _BspFile:
         logging.debug("Reading faces")
         def read_face(plane_id, side, edge_list_idx, num_edges, texinfo_id, typelight, baselight, light1, light2,
                       lightmap_offset):
-            return Face(edge_list_idx, num_edges, texinfo_id, lightmap_offset)
+            return Face(self, edge_list_idx, num_edges, texinfo_id, lightmap_offset)
         self.faces = self._read_lump(f, self._read_dir_entry(f, 7), "<HHLHHBBBBl", read_face)
 
         logging.debug("Reading texinfo")
         def read_texinfo(vs1, vs2, vs3, ds, vt1, vt2, vt3, dt, texture_id, flags):
-            return TexInfo((vs1, vs2, vs3), ds, (vt1, vt2, vt3), dt, texture_id, flags)
+            return TexInfo(self, (vs1, vs2, vs3), ds, (vt1, vt2, vt3), dt, texture_id, flags)
         self.texinfo = self._read_lump(f, self._read_dir_entry(f, 6), "<ffffffffLL", read_texinfo)
 
         logging.debug("Reading lightmap")
@@ -133,32 +231,39 @@ class _BspFile:
         logging.debug("Reading models")
         def read_model(mins1, mins2, mins3, maxs1, maxs2, maxs3, o1, o2, o3, n1, n2, n3, n4, num_leaves, first_face_idx,
                        num_faces):
-            return Model(first_face_idx, num_faces)
+            return Model(self, first_face_idx, num_faces)
         self.models = self._read_lump(f, self._read_dir_entry(f, 14), "<ffffffffflllllll", read_model)
 
         logging.debug("Reading textures")
         texture_dir_entry = self._read_dir_entry(f, 2)
         self.textures = self._read_textures(f, texture_dir_entry)
 
+        logging.debug("Reading nodes")
+        def read_node(plane_id, c1, c2, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_id, num_faces):
+            bbox = BBoxShort((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
+            return Node(self, plane_id, c1, c2, bbox, face_id, num_faces)
+        self.nodes = self._read_lump(f, self._read_dir_entry(f, 5), "<lhhhhhhhhHH", read_node)
 
-class Bsp(_BspFile):
-    """An interface to a BSP file, with added convenience methods"""
+        logging.debug("Reading leaves")
+        def read_leaf(contents, vis_offset, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_list_idx, num_faces, l1, l2,
+                      l3, l4):
+            bbox = BBoxShort((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
+            return Leaf(self, contents, vis_offset, bbox, face_list_idx, num_faces)
+        self.leaves = self._read_lump(f, self._read_dir_entry(f, 10), "<llhhhhhhHHBBBB", read_leaf)
 
-    def iter_face_vert_indices(self, face_idx):
-        face = self.faces[face_idx]
-        for edge_id in self.edge_list[face.edge_list_idx:face.edge_list_idx + face.num_edges]:
-            if edge_id < 0:
-                v = self.edges[-edge_id][1]
-            else:
-                v = self.edges[edge_id][0]
-            yield v
+        logging.debug("Reading face list")
+        self.face_list = self._read_lump(f, self._read_dir_entry(f, 11), "<H", lambda x: x)
 
-    def iter_face_verts(self, face_idx):
-        return (self.vertices[idx] for idx in self.iter_face_vert_indices(face_idx))
+        logging.debug("Reading planes")
+        def read_plane(n1, n2, n3, d, plane_type):
+            return Plane((n1, n2, n3), d, PlaneType(plane_type))
+        self.planes = self._read_lump(f, self._read_dir_entry(f, 1), "<ffffl", read_plane)
 
-    def iter_face_tex_coords(self, face_idx):
-        tex_info = self.texinfo[self.faces[face_idx].texinfo_id]
-        return [get_tex_coords(tex_info, v) for v in self.iter_face_verts(face_idx)]
+        logging.debug("Reading entities")
+        entity_dir_entry = self._read_dir_entry(f, 0)
+        f.seek(entity_dir_entry.offset)
+        b = self._read(f, entity_dir_entry.size)
+        self.entities = ent.parse_entities(b[:b.index(b'\0')].decode('ascii'))
 
 
 def get_tex_coords(tex_info, vert):
@@ -177,5 +282,5 @@ if __name__ == "__main__":
     root_logger.setLevel(logging.DEBUG)
 
     fs = pak.Filesystem(sys.argv[1])
-    bsp = BspFile(io.BytesIO(fs[sys.argv[2]]))
+    bsp = Bsp(io.BytesIO(fs[sys.argv[2]]))
 

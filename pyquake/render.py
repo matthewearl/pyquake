@@ -56,7 +56,7 @@ def face_has_lightmap(bsp, face_idx):
 def extract_lightmap_texture(bsp, face_idx):
     face = bsp.faces[face_idx]
 
-    tex_coords = np.array(list(bsp.iter_face_tex_coords(face_idx)))
+    tex_coords = np.array(list(face.tex_coords))
 
     mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
     maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
@@ -97,8 +97,7 @@ def make_full_lightmap(bsp, lightmap_size=(512, 512)):
 
 
 def get_face_coords(bsp):
-    return {face_idx: np.array([v for v in bsp.iter_face_verts(face_idx)])
-                for face_idx in range(len(bsp.faces))}
+    return {face_idx: np.array([v for v in face.vertices]) for face_idx, face in enumerate(bsp.faces)}
 
 class FpsDisplay:
     def __init__(self):
@@ -336,6 +335,11 @@ class Renderer:
         glRotatef(-view_angle[0], 0, 1, 0)
         glRotatef(-view_angle[1], 0, 0, 1)
         glTranslate(*-np.array(pos))
+
+    def _set_view_to_player_start(self):
+        player_start = next(iter(e for e in self._bsp.entities if e['classname'] == 'info_player_start'))
+        glRotatef(-player_start['angle'], 0, 0, 1)
+        glTranslate(*-np.array(player_start['origin']))
 
     def _draw_frame(self):
         self._fps_display.new_frame()
