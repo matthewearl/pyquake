@@ -27,6 +27,8 @@ __all__ = (
 
 import collections
 import enum
+import functools
+import itertools
 import logging
 import struct
 from typing import NamedTuple, Tuple, List
@@ -92,6 +94,13 @@ class Leaf(NamedTuple):
                 for i in range(self.face_list_idx, self.face_list_idx + self.num_faces))
 
 
+def _listify(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        return list(f(*args, **kwargs))
+    return wrapped
+
+
 class Face(NamedTuple):
     bsp: "Bsp"
     edge_list_idx: int
@@ -119,6 +128,39 @@ class Face(NamedTuple):
     @property
     def tex_info(self):
         return self.bsp.texinfo[self.texinfo_id]
+
+    @property
+    @functools.lru_cache(None)
+    def plane(self):
+        first_edge = None
+        best_normal = None
+
+        verts = list(self.vertices)
+        for prev_vert, vert in zip(itertools.chain(verts[-1:], verts[:-1]), verts):
+            edge = np.array(vert) - np.array(prev_vert)
+            edge /= np.linalg.norm(edge)
+            if first_edge is None:
+                first_edge = edge
+            else:
+                normal = np.cross(edge, first_edge)
+                if best_normal is None or np.linalg.norm(best_normal) < np.linalg.norm(normal):
+                    best_normal = normal
+            prev_vert = vert
+
+        normal = normal / np.linalg.norm(normal)
+        return normal, np.dot(verts[0], normal)
+
+    @property
+    @functools.lru_cache(None)
+    @_listify
+    def edge_planes(self):
+        normal, _ = self.plane
+        verts = list(self.vertices)
+        for prev_vert, vert in zip(itertools.chain(verts[-1:], verts[:-1]), verts):
+            edge = np.array(vert) - np.array(prev_vert)
+            edge /= np.linalg.norm(edge)
+            edge_normal = np.cross(normal, edge)
+            yield edge_normal, np.dot(vert, edge_normal)
 
 
 class TexInfo(NamedTuple):
