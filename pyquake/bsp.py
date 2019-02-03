@@ -1,4 +1,4 @@
-# Copyright (c) 2018 Matthew Earl
+# Copyright (c) 2019 Matthew Earl
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@ import collections
 import enum
 import logging
 import struct
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Tuple, List
 
 import numpy as np
 
@@ -59,11 +59,23 @@ class BBoxShort(NamedTuple):
 class Node(NamedTuple):
     bsp: "Bsp"
     plane_id: int
-    front_id: int
-    back_id: int
+    child_ids: Tuple[int, int]
     bbox: BBoxShort
     face_id: int
     num_faces: int
+
+    @property
+    def plane(self):
+        return self.bsp.planes[self.plane_id]
+
+    def child_is_leaf(self, child_num):
+        return self.child_ids[child_num] < 0
+
+    def get_child(self, child_num):
+        if self.child_is_leaf(child_num):
+            return self.bsp.leaves[-self.child_ids[child_num] - 1]
+        else:
+            return self.bsp.nodes[self.child_ids[child_num]]
 
 
 class Leaf(NamedTuple):
@@ -73,6 +85,11 @@ class Leaf(NamedTuple):
     bbox: BBoxShort
     face_list_idx: int
     num_faces: int
+
+    @property
+    def faces(self):
+        return (self.bsp.faces[self.bsp.face_list[i]]
+                for i in range(self.face_list_idx, self.face_list_idx + self.num_faces))
 
 
 class Face(NamedTuple):
@@ -115,17 +132,22 @@ class TexInfo(NamedTuple):
 
     @property
     def texture(self):
-        return bsp.textures[texture_id]
+        return self.bsp.textures[texture_id]
 
 
 class Model(NamedTuple):
     bsp: "Bsp"
     first_face_idx: int
     num_faces: int
+    node_id: int
 
     @property
     def faces(self):
-        return bsp.faces[bsp.first_face_idx:bsp.first_face_idx + num_faces]
+        return self.bsp.faces[self.first_face_idx:self.first_face_idx + self.num_faces]
+
+    @property
+    def node(self):
+        return self.bsp.nodes[self.node_id]
 
 
 class Texture(NamedTuple):
@@ -231,7 +253,7 @@ class Bsp:
         logging.debug("Reading models")
         def read_model(mins1, mins2, mins3, maxs1, maxs2, maxs3, o1, o2, o3, n1, n2, n3, n4, num_leaves, first_face_idx,
                        num_faces):
-            return Model(self, first_face_idx, num_faces)
+            return Model(self, first_face_idx, num_faces, n1)
         self.models = self._read_lump(f, self._read_dir_entry(f, 14), "<ffffffffflllllll", read_model)
 
         logging.debug("Reading textures")
@@ -241,7 +263,7 @@ class Bsp:
         logging.debug("Reading nodes")
         def read_node(plane_id, c1, c2, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_id, num_faces):
             bbox = BBoxShort((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
-            return Node(self, plane_id, c1, c2, bbox, face_id, num_faces)
+            return Node(self, plane_id, (c1, c2), bbox, face_id, num_faces)
         self.nodes = self._read_lump(f, self._read_dir_entry(f, 5), "<lhhhhhhhhHH", read_node)
 
         logging.debug("Reading leaves")
