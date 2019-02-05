@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Iterable
 
 import numpy as np
 
@@ -13,10 +13,35 @@ def _infront(point, plane_norm, plane_dist):
     return np.dot(point, plane_norm) - plane_dist >= 0
 
 
+class _FaceTextureCache:
+    def __init__(self, pal: np.ndarray):
+        self._pal = pal
+        self._cache = {}
+
+    def _load_face_texture(self, face: bsp.Face):
+        texture = face.tex_info.texture
+        array_im = self._pal[np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))]
+        #array_im = array_im ** 0.8
+        return array_im
+
+    def get_face_texture(self, face: bsp.Face):
+        if id(face) not in self._cache:
+            self._cache[id(face)] = self._load_face_texture(face)
+        return self._cache[id(face)]
+
+
+def _sample_texture(texture_cache: _FaceTextureCache, face: bsp.Face, poi: np.ndarray):
+    s, t = bsp.get_tex_coords(face.tex_info, poi)
+    im = texture_cache.get_face_texture(face)
+    s %= im.shape[1]
+    t %= im.shape[0]
+    return im[int(t), int(s)]
+
+
 def _trace_leaves(is_leaf: bool, node: bsp.Node, ray: Ray, near_clip: float = 0., far_clip: float = np.inf):
     """Trace a ray through a BSP node, yielding all encountered leaves (in near to far order)."""
     if is_leaf:
-        yield node
+        yield node, near_clip, far_clip
     else:
         plane = node.plane
         plane_norm = np.array(plane.normal)
@@ -58,17 +83,24 @@ def _ray_face_intersect(face: bsp.Face, ray: Ray):
     return None, np.inf
 
 
-def _ray_bsp_intersect(model: bsp.Model, ray: Ray):
+def _ray_faces_intersect(faces: Iterable[bsp.Face], ray: Ray, near_clip: float = 0., far_clip: float = np.inf):
     nearest_face, nearest_poi, nearest_dist = None, None, np.inf
-    for leaf in _trace_leaves(False, model.node, ray):
-        for face in leaf.faces:
-            poi, ray_dist = _ray_face_intersect(face, ray)
-            if ray_dist < nearest_dist:
-                nearest_face, nearest_poi, nearest_dist = face, poi, ray_dist
+    for face in faces:
+        poi, ray_dist = _ray_face_intersect(face, ray)
+        if ray_dist < nearest_dist and near_clip - 1e-3 <= ray_dist <= far_clip + 1e-3:
+            nearest_face, nearest_poi, nearest_dist = face, poi, ray_dist
+    return nearest_face, nearest_poi, nearest_dist
+
+
+def _ray_bsp_intersect(model: bsp.Model, ray: Ray):
+    nearest_leaf = None
+    for leaf, near_clip, far_clip in _trace_leaves(False, model.node, ray):
+        nearest_face, nearest_poi, nearest_dist = _ray_faces_intersect(leaf.faces, ray, near_clip, far_clip)
         if nearest_face is not None:
+            nearest_leaf = leaf
             break
 
-    return nearest_face, nearest_poi, nearest_dist
+    return nearest_face, nearest_poi, nearest_dist, nearest_leaf
 
 
 def raytracer_main2():
@@ -88,7 +120,7 @@ def raytracer_main2():
     fs = pak.Filesystem(sys.argv[1])
     bsp = Bsp(io.BytesIO(fs[sys.argv[2]]))
 
-    WIDTH, HEIGHT = 50, 50
+    WIDTH, HEIGHT = 200, 200
     K_inv = np.matrix([[WIDTH / 2.,             0,  WIDTH  / 2],
                        [0,           HEIGHT / 2.,  HEIGHT / 2],
                        [0,                      0,  1]]).I
@@ -101,25 +133,31 @@ def raytracer_main2():
                     [0., 0.,  1.],
                     [0., -1., 0.]])
 
-    #cv2.namedWindow("out")
+    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+    texture_cache = _FaceTextureCache(pal)
+
+    def pix_to_dir(x, y):
+        ray_dir = rot @ K_inv @ np.array([x, y, 1])
+        return ray_dir / np.linalg.norm(ray_dir)
+
+    cv2.namedWindow("out")
     out = np.zeros((HEIGHT, WIDTH, 3))
     color_wheel = np.random.random((32, 3))
     color_wheel /= np.max(color_wheel, axis=1)[:, None]
     for y in range(HEIGHT):
-        print(y)
         for x in range(WIDTH):
-            ray_dir = rot @ K_inv @ np.array([x, y, 1])
-            ray_dir = ray_dir / np.linalg.norm(ray_dir)
-            ray = Ray(ray_origin, ray_dir)
+            ray = Ray(ray_origin, pix_to_dir(x, y))
 
-            face, poi, dist = _ray_bsp_intersect(bsp.models[0], ray)
+            face, poi, dist, _ = _ray_bsp_intersect(bsp.models[0], ray)
+            
+            #color = (0., 0., 0.) if face is None else color_wheel[hash(face) % len(color_wheel)]
+            color = (1, 0, 1) if face is None else _sample_texture(texture_cache, face, poi)
+            out[y, x] = np.flip(color, axis=0)
 
-            out[y, x] = color_wheel[hash(face) % len(color_wheel)]
+        cv2.imshow("out", out)
+        cv2.waitKey(1)
 
-            #cv2.imshow("out", out)
-            #cv2.waitKey(1)
-
-    #cv2.destroyWindow("out")
+    cv2.destroyWindow("out")
     cv2.imwrite("out.png", out * 255.)
 
 

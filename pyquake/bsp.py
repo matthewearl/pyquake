@@ -174,7 +174,7 @@ class TexInfo(NamedTuple):
 
     @property
     def texture(self):
-        return self.bsp.textures[texture_id]
+        return self.bsp.textures[self.texture_id]
 
 
 class Model(NamedTuple):
@@ -196,7 +196,7 @@ class Texture(NamedTuple):
     name: str
     width: int
     height: int
-    data: bytes
+    data: List[bytes]
     
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
