@@ -38,6 +38,13 @@ import numpy as np
 from . import ent
 
 
+def _listify(f):
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        return list(f(*args, **kwargs))
+    return wrapped
+
+
 class PlaneType(enum.Enum):
     AXIAL_X = 0
     AXIAL_Y = 1
@@ -94,11 +101,29 @@ class Leaf(NamedTuple):
                 for i in range(self.face_list_idx, self.face_list_idx + self.num_faces))
 
 
-def _listify(f):
-    @functools.wraps(f)
-    def wrapped(*args, **kwargs):
-        return list(f(*args, **kwargs))
-    return wrapped
+    @property
+    @functools.lru_cache(None)
+    @_listify
+    def visible_leaves(self):
+        i = self.vis_offset
+        visdata = self.bsp.visdata
+        leaf_idx = 1
+        while leaf_idx < len(self.bsp.leaves):
+            if visdata[i] == 0:
+                leaf_idx += 8 * visdata[i + 1]
+                i += 2
+            else:
+                for j in range(8):
+                    if visdata[i] & (1 << j):
+                        yield self.bsp.leaves[leaf_idx]
+                    leaf_idx += 1
+                i += 1
+
+    @property
+    @functools.lru_cache(None)
+    @_listify
+    def visible_faces(self):
+        return (face for leaf in self.visible_leaves for face in leaf.faces)
 
 
 class Face(NamedTuple):
@@ -162,6 +187,20 @@ class Face(NamedTuple):
             edge_normal = np.cross(normal, edge)
             yield edge_normal, np.dot(vert, edge_normal)
 
+    @property
+    @functools.lru_cache(None)
+    def area(self):
+        verts = np.array(list(self.vertices))
+        v0 = verts[0]
+        return 0.5 * sum(np.linalg.norm(np.cross(v1 - v0, v2 - v0)) for v1, v2 in zip(verts[1:-1], verts[2:]))
+
+    @property
+    @functools.lru_cache(None)
+    def centroid(self):
+        return np.array(list(self.vertices)).mean(axis=0)
+
+
+
 
 class TexInfo(NamedTuple):
     bsp: "Bsp"
@@ -175,6 +214,17 @@ class TexInfo(NamedTuple):
     @property
     def texture(self):
         return self.bsp.textures[self.texture_id]
+
+    @property
+    def texel_area(self):
+        return np.linalg.norm(np.cross(self.vec_s, self.vec_t))
+
+    def vert_to_tex_coords(self, vert):
+        return [np.dot(vert, self.vec_s) + self.dist_s, np.dot(vert, self.vec_t) + self.dist_t]
+
+    def tex_coords_to_vert(self, tc):
+        return np.array(self.vec_s) * (tc[0] - self.dist_s) + np.array(self.vec_t) * (tc[1] - self.dist_t)
+
 
 
 class Model(NamedTuple):
@@ -329,9 +379,12 @@ class Bsp:
         b = self._read(f, entity_dir_entry.size)
         self.entities = ent.parse_entities(b[:b.index(b'\0')].decode('ascii'))
 
+        logging.debug("Reading visdata")
+        visinfo_dir_entry = self._read_dir_entry(f, 4)
+        f.seek(visinfo_dir_entry.offset)
+        b = self._read(f, visinfo_dir_entry.size)
+        self.visdata = b
 
-def get_tex_coords(tex_info, vert):
-    return [np.dot(vert, tex_info.vec_s) + tex_info.dist_s, np.dot(vert, tex_info.vec_t) + tex_info.dist_t]
 
 
 if __name__ == "__main__":
