@@ -9,6 +9,7 @@ setup(name='Pyquake',
           'console_scripts': [
                 'demo_viewer = pyquake.render:demo_viewer_main',
                 'ray_tracer = pyquake.ray:raytracer_main',
+                'pyqclient = pyquake.client:client_main',
           ]
       },
       description='Python Quake client',
