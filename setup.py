@@ -10,6 +10,7 @@ setup(name='Pyquake',
                 'demo_viewer = pyquake.render:demo_viewer_main',
                 'ray_tracer = pyquake.ray:raytracer_main',
                 'pyqclient = pyquake.client:client_main',
+                'aiodgram = pyquake.aiodgram:main',
           ]
       },
       description='Python Quake client',

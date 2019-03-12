@@ -18,6 +18,13 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+
+__all__ = (
+    'DatagramConnection',
+    'DatagramError',
+)
+
+
 import enum
 import io
 import logging
@@ -31,7 +38,7 @@ logger = logging.getLogger(__name__)
 _MAX_DATAGRAM_BODY = 32000
 
 
-class NetFlags(enum.IntFlag):
+class _NetFlags(enum.IntFlag):
     DATA = 0x1
     ACK = 0x2
     NAK = 0x4
@@ -40,11 +47,11 @@ class NetFlags(enum.IntFlag):
     CTL = 0x8000
 
 
-_UNSUPPORTED_FLAG_COMBINATIONS = (
-    #NetFlags.DATA,
-    NetFlags.DATA | NetFlags.EOM,
-    NetFlags.UNRELIABLE,
-    NetFlags.ACK,
+_SUPPORTED_FLAG_COMBINATIONS = (
+    #_NetFlags.DATA,
+    _NetFlags.DATA | _NetFlags.EOM,
+    _NetFlags.UNRELIABLE,
+    _NetFlags.ACK,
 )
 
 
@@ -76,19 +83,19 @@ class DatagramConnection:
         body = b'\x01QUAKE\x00\x03'
         header_fmt = ">HH"
         header_size = struct.calcsize(header_fmt)
-        header = struct.pack(header_fmt, NetFlags.CTL, len(body) + header_size)
+        header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
         sock.sendto(header + body, (host, port))
 
         packet, addr = sock.recvfrom(1024)
         if addr != (host, port):
             raise DatagramError("Spoofed packet received")
         netflags, size = struct.unpack(header_fmt, packet[:header_size])
-        netflags = NetFlags(netflags)
+        netflags = _NetFlags(netflags)
         body = packet[header_size:]
         if size != len(packet):
             raise DatagramError("Invalid packet size")
 
-        if netflags != NetFlags.CTL:
+        if netflags != _NetFlags.CTL:
             raise DatagramError(f"Unexpected net flags: {netflags}")
 
         if body[0] != 0x81:
@@ -108,9 +115,9 @@ class DatagramConnection:
 
     def _send_chunk(self):
         body = self._send_buffer[:_MAX_DATAGRAM_BODY]
-        netflags = NetFlags.DATA
+        netflags = _NetFlags.DATA
         if len(body) <= _MAX_DATAGRAM_BODY:
-            netflags |= NetFlags.EOM
+            netflags |= _NetFlags.EOM
         self._send_packet(netflags, self._send_seq, body)
 
     def send(self, body, reliable=False):
@@ -123,7 +130,7 @@ class DatagramConnection:
         else:
             if len(body) > _MAX_DATAGRAM_BODY:
                 raise DatagramConnection(f"Datagram too big: {len(body)}")
-            self._send_packet(NetFlags.UNRELIABLE, self._unreliable_send_seq, body)
+            self._send_packet(_NetFlags.UNRELIABLE, self._unreliable_send_seq, body)
             self._unreliable_send_seq += 1
 
     def iter_messages(self):
@@ -138,16 +145,16 @@ class DatagramConnection:
                 raise DatagramError("Spoofed packet received")
 
             netflags, size, seq_num = struct.unpack(header_fmt, packet[:header_size])
-            netflags = NetFlags(netflags)
+            netflags = _NetFlags(netflags)
             body = packet[header_size:]
             logging.debug("Received packet: %s %s %s", netflags, seq_num, body)
 
             assert len(packet) == size
 
-            if netflags not in _UNSUPPORTED_FLAG_COMBINATIONS:
+            if netflags not in _SUPPORTED_FLAG_COMBINATIONS:
                 raise DatagramError(f"Unsupported flag combination: {netflags}")
 
-            if NetFlags.UNRELIABLE in netflags:
+            if _NetFlags.UNRELIABLE in netflags:
                 if seq_num < self._unreliable_recv_seq:
                     logging.warning("Stale unreliable message received")
                 else:
@@ -156,7 +163,7 @@ class DatagramConnection:
                                         self._unreliable_recv_seq - seq_num)
                     self._unreliable_recv_seq = seq_num + 1
                     yield body
-            elif NetFlags.ACK in netflags:
+            elif _NetFlags.ACK in netflags:
                 if seq_num != self._send_seq:
                     logging.warning("Stale ACK received")
                 elif seq_num != self._ack_seq:
@@ -167,14 +174,16 @@ class DatagramConnection:
                     self._ack_seq += 1
                     if self._send_buffer:
                         self._send_chunk()
-            elif NetFlags.DATA in netflags:
-                self._send_packet(NetFlags.ACK, seq_num, b'')
+            elif _NetFlags.DATA in netflags:
+                self._send_packet(_NetFlags.ACK, seq_num, b'')
                 if seq_num != self._recv_seq:
                     logging.warning("Duplicate reliable message received")
                 else:
                     self._recv_seq += 1
                     recv_buffer += body
-                    if NetFlags.EOM in netflags:
+                    if _NetFlags.EOM in netflags:
                         yield recv_buffer
                         recv_buffer = b''
 
+    def disconnect(self):
+        self.send(b'\x02')

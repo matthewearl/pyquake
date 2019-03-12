@@ -19,9 +19,13 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import logging
+import struct
 
 from . import proto
 from . import dgram
+
+
+logger = logging.getLogger()
 
 
 class NetworkError(Exception):
@@ -32,26 +36,41 @@ def _make_cmd_body(cmd):
     return b'\x04' + cmd.encode('ascii') + b'\0'
 
 
+def _make_move_body(yaw, pitch, roll, forward, side, up, buttons, impulse):
+    return struct.pack("<BfBBBhhhBB",
+                       3, 0.,
+                       pitch, yaw, roll,
+                       forward, side, up, buttons, impulse)
+
+
 def client_main():
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(logging.WARNING)
 
     host, port = "localhost", 26000
 
     conn = dgram.DatagramConnection.connect(host, port)
+    spawned = False
 
-    for msg in conn.iter_messages():
-        while msg:
-            parsed, msg = proto.ServerMessage.parse_message(msg)
-            print(parsed)
+    try:
+        for msg in conn.iter_messages():
+            while msg:
+                parsed, msg = proto.ServerMessage.parse_message(msg)
+                logger.debug("Got message: %s", parsed)
 
-            if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
-                if parsed.num == 1:
-                    conn.send(_make_cmd_body("prespawn"), reliable=True)
-                elif parsed.num == 2:
-                    body = (_make_cmd_body('name "pyquake"\n') +
-                            _make_cmd_body("color 0 0\n") +
-                            _make_cmd_body("spawn "))
-                    conn.send(body, reliable=True)
-                elif parsed.num == 3:
-                    conn.send(_make_cmd_body("begin"), reliable=True)
+                if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
+                    if parsed.num == 1:
+                        conn.send(_make_cmd_body("prespawn"), reliable=True)
+                    elif parsed.num == 2:
+                        body = (_make_cmd_body('name "pyquake"\n') +
+                                _make_cmd_body("color 0 0\n") +
+                                _make_cmd_body("spawn "))
+                        conn.send(body, reliable=True)
+                    elif parsed.num == 3:
+                        conn.send(_make_cmd_body("begin"), reliable=True)
+                elif parsed.msg_type == proto.ServerMessageType.UPDATECOLORS:
+                    spawned = True
+                elif spawned:
+                    conn.send(_make_move_body(0, 0, 0, 0, 0, 0, 3, 0))
+    except KeyboardInterrupt:
+        conn.disconnect()
 
