@@ -18,9 +18,11 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import asyncio
 import logging
 import struct
 
+from . import aiodgram
 from . import proto
 from . import dgram
 
@@ -43,8 +45,51 @@ def _make_move_body(yaw, pitch, roll, forward, side, up, buttons, impulse):
                        forward, side, up, buttons, impulse)
 
 
+async def _do_movements(conn):
+    while True:
+        logging.info("Forward")
+        conn.send(_make_move_body(0, 0, 0, 10000, 0, 0, 0, 0))
+        await asyncio.sleep(1)
+        logging.info("Back")
+        conn.send(_make_move_body(0, 0, 0, -10000, 0, 0, 0, 0))
+        await asyncio.sleep(1)
+
+
+async def _aioclient():
+    host, port = "localhost", 26000
+
+    conn = await aiodgram.DatagramConnection.connect(host, port)
+
+    logger.info("Connected to %s %s", host, port)
+
+    try:
+        while True:
+            msg = await conn.read_message()
+            while msg:
+                parsed, msg = proto.ServerMessage.parse_message(msg)
+                logger.debug("Got message: %s", parsed)
+                if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
+                    if parsed.num == 1:
+                        await conn.send_reliable(_make_cmd_body("prespawn"))
+                    elif parsed.num == 2:
+                        body = (_make_cmd_body('name "pyquake"\n') +
+                                _make_cmd_body("color 0 0\n") +
+                                _make_cmd_body("spawn "))
+                        await conn.send_reliable(body)
+                    elif parsed.num == 3:
+                        await conn.send_reliable(_make_cmd_body("begin"))
+                        logging.info("Signon complete")
+                        asyncio.create_task(_do_movements(conn)).add_done_callback(
+                            lambda fut: fut.result())
+    finally:
+        conn.disconnect()
+
+def aioclient_main():
+    logging.getLogger().setLevel(logging.INFO)
+    asyncio.run(_aioclient())
+
 def client_main():
-    logging.getLogger().setLevel(logging.WARNING)
+    logging.getLogger().setLevel(logging.INFO)
 
     host, port = "localhost", 26000
 

@@ -41,6 +41,13 @@ class _NetFlags(enum.IntFlag):
     CTL = 0x8000
 
 
+_SUPPORTED_FLAG_COMBINATIONS = (
+    #_NetFlags.DATA,    # Should work but I don't think it's been seen in the wild
+    _NetFlags.DATA | _NetFlags.EOM,
+    _NetFlags.UNRELIABLE,
+    _NetFlags.ACK,
+)
+
 class DatagramError(Exception):
     pass
 
@@ -59,23 +66,28 @@ class _GenericUdpProtocol(asyncio.Protocol):
     async def wait_until_connected(self):
         await self._connected_future
 
-    async def datagram_received(self, data, addr):
-        await self._recv_queue.put((data, addr))
+    def datagram_received(self, data, addr):
+        asyncio.ensure_future(self._recv_queue.put((data, addr)), loop=self._loop)
         
     async def recvfrom(self):
-        return await self._recv_queue.get()
+        data, addr = await self._recv_queue.get()
+        logger.debug("Received from %s: %r (%s)", addr, data, data.hex())
+        return data, addr
 
     def sendto(self, data, addr):
+        logger.debug("Sending: %r (%s)", data, data.hex())
         self._transport.sendto(data, addr)
 
     def connection_lost(self, exc):
         assert False, "UDP cannot close connection?"
 
 
-class DatagramConnection(_GenericUdpProtocol):
-    def __init__(self, loop, udp_protocol):
-        self._loop = loop
+def _raise_cb(fut):
+    fut.result()
 
+
+class DatagramConnection:
+    def __init__(self, udp_protocol):
         self._host = None
         self._port = None
 
@@ -97,7 +109,7 @@ class DatagramConnection(_GenericUdpProtocol):
         header_fmt = ">HH"
         header_size = struct.calcsize(header_fmt)
         header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
-        self._udp.sendto(header + body, (host, port)
+        self._udp.sendto(header + body, (host, port))
 
         # Wait for, and parse the response.
         packet, addr = await self._udp.recvfrom()
@@ -119,14 +131,25 @@ class DatagramConnection(_GenericUdpProtocol):
         self._port, = struct.unpack("<L", body[1:])
         self._host = host
 
-    @classmethod
-    async def connect(cls, host, port, loop):
-        transport, protocol = await loop.create_datagram_endpoint(
-                lambda: _GenericUdpProtocol(loop))
+        # Spin up required tasks.
+        self._send_reliable_task = asyncio.create_task(self._send_reliable_loop())
+        self._recv_task = asyncio.create_task(self._recv_loop())
+        self._send_reliable_task.add_done_callback(lambda fut: fut.result())
+        self._recv_task.add_done_callback(lambda fut: fut.result())
 
-        conn = cls(host, port, loop, protocol)
+    @classmethod
+    async def connect(cls, host, port):
+        loop = asyncio.get_running_loop()
+        transport, protocol = await loop.create_datagram_endpoint(
+                lambda: _GenericUdpProtocol(loop),
+                family=socket.AF_INET)
+
+        conn = cls(protocol)
         await conn._connect(host, port)
         return conn
+
+    async def wait_until_disconnected(self):
+        await asyncio.gather(self._send_reliable_task, self._recv_task)
 
     def _encap_packet(self, netflags, seq_num, payload):
         logging.debug("Sending packet: %s, %s, %s", netflags, seq_num, payload)
@@ -136,7 +159,7 @@ class DatagramConnection(_GenericUdpProtocol):
                              netflags, len(payload) + header_size, seq_num)
         return header + payload
 
-    async def _send_reliable_task(self):
+    async def _send_reliable_loop(self):
         send_seq = 0
 
         while True:
@@ -147,11 +170,11 @@ class DatagramConnection(_GenericUdpProtocol):
             while data:
                 # Send the packet
                 payload, data = data[:_MAX_DATAGRAM_BODY], data[_MAX_DATAGRAM_BODY:]
-                netflags = NetFlags.DATA
+                netflags = _NetFlags.DATA
                 if not data:
-                    netflags |= NetFlags.EOM
+                    netflags |= _NetFlags.EOM
                 packet = self._encap_packet(netflags, send_seq, payload)
-                self._udp.sendto(packet, (self.host, self.port))
+                self._udp.sendto(packet, (self._host, self._port))
 
                 # Wait for an ACK
                 while True:
@@ -177,14 +200,14 @@ class DatagramConnection(_GenericUdpProtocol):
         packet = self._encap_packet(_NetFlags.UNRELIABLE,
                                     self._unreliable_send_seq,
                                     data)
-        self._udp.sendto(packet, (self.host, self.port))
+        self._udp.sendto(packet, (self._host, self._port))
         self._unreliable_send_seq += 1
 
     def _send_ack(self, seq_num):
         packet = self._encap_packet(_NetFlags.ACK, seq_num, b'')
-        self._udp.sendto(packet, (self.host, self.port))
+        self._udp.sendto(packet, (self._host, self._port))
 
-    async def _recv_task(self):
+    async def _recv_loop(self):
         header_fmt = ">HHL"
         header_size = struct.calcsize(header_fmt)
 
@@ -222,108 +245,31 @@ class DatagramConnection(_GenericUdpProtocol):
                 await self._send_reliable_ack_queue.put(seq_num)
             elif _NetFlags.DATA in netflags:
                 self._send_ack(seq_num)
-                if seq_num != self._recv_seq:
+                if seq_num != recv_seq:
                     logging.warning("Duplicate reliable message received")
                 else:
                     reliable_msg += body
-                    self._recv_seq += 1
+                    recv_seq += 1
 
                 if _NetFlags.EOM in netflags:
                     await self._message_queue.put(reliable_msg)
                     reliable_msg = b''
 
+    async def read_message(self):
+        return await self._message_queue.get()
 
-async def _quake_protocol(host, port, loop):
-    transport, protocol = loop.create_datagram_endpoint(
-            lambda: _GenericUdpProtocol(loop))
-
-    await protocol.connected
-
-    body = b'\x01QUAKE\x00\x03'
-    header_fmt = ">HH"
-    header_size = struct.calcsize(header_fmt)
-    header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
-    protocol.sendto(header + body, (host, port))
-
-    data, addr = await protocol.recvfrom()
-    if addr != (host, port):
-        raise DatagramError("Spoofed packet received")
-    netflags, size = struct.unpack(header_fmt, packet[:header_size])
-    netflags = _NetFlags(netflags)
-    body = packet[header_size:]
-    if size != len(packet):
-        raise DatagramError("Invalid packet size")
-
-    if netflags != _NetFlags.CTL:
-        raise DatagramError(f"Unexpected net flags: {netflags}")
-
-    if body[0] != 0x81:
-        raise NetworkError(f"Expected CCREP_ACCEPT message, not {body[0]}")
-    if len(body) != 5:
-        raise NetworkError(f"Unexpected packet length {len(body)}")
-
-    new_port, = struct.unpack("<L", body[1:])
-    return new_port
-
-
-class DatagramConnection:
-    def __init__(self, loop):
-        self._sock = None
-        self._host = None
-        self._port = None
-
-        self._send_seq = 0
-        self._ack_seq = 0
-        self._recv_seq = 0
-        self._unreliable_send_seq = 0
-        self._unreliable_recv_seq = 0
-
-        self._loop = loop
-
-        self.can_send = True
-
-    async def _connect(self, host, port):
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._host = socket.gethostbyname(host)
-        self._port = port
-
-        body = b'\x01QUAKE\x00\x03'
-        header_fmt = ">HH"
-        header_size = struct.calcsize(header_fmt)
-        header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
-        self._sock.sendto(header + body, (host, port))
-
-        packet = await self._loop.sock_recv(self._sock, 1024)
-
-        netflags, size = struct.unpack(header_fmt, packet[:header_size])
-        netflags = _NetFlags(netflags)
-        body = packet[header_size:]
-        if size != len(packet):
-            raise DatagramError("Invalid packet size")
-
-        if netflags != _NetFlags.CTL:
-            raise DatagramError(f"Unexpected net flags: {netflags}")
-
-        if body[0] != 0x81:
-            raise NetworkError(f"Expected CCREP_ACCEPT message, not {body[0]}")
-        if len(body) != 5:
-            raise NetworkError(f"Unexpected packet length {len(body)}")
-
-        self._port, = struct.unpack("<L", body[1:])
-        logger.debug(f"Got new port: {self._port}")
-
-    @classmethod
-    async def connect(cls, host, port, loop):
-        conn = cls(loop)
-        await conn._connect(host, port)
+    def disconnect(self):
+        self.send(b'\x02')
 
 
 async def _async_main():
     loop = asyncio.get_running_loop()
-    #conn = await DatagramConnection.connect("localhost", 26000, loop)
-    await _quake_protocol("localhost", 26000, loop)
+    conn = await DatagramConnection.connect("localhost", 26000)
+
+    await conn.wait_until_disconnected()
 
 
 def main():
+    logging.getLogger().setLevel(logging.DEBUG)
     asyncio.run(_async_main())
 
