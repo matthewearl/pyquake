@@ -99,20 +99,35 @@ class DatagramConnection:
 
         self._unreliable_send_seq = 0
 
+    async def _monitor_queues(self):
+        while True:
+            await asyncio.sleep(1)
+            logging.debug("Dgram Queue lengths: send=%s ack=%s out=%s",
+                          self._send_reliable_queue.qsize(),
+                          self._send_reliable_ack_queue.qsize(),
+                          self._message_queue.qsize())
+                         
     async def _connect(self, host, port):
         host = socket.gethostbyname(host)
 
         await self._udp.wait_until_connected()
 
-        # Request a connection
-        body = b'\x01QUAKE\x00\x03'
-        header_fmt = ">HH"
-        header_size = struct.calcsize(header_fmt)
-        header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
-        self._udp.sendto(header + body, (host, port))
+        # Request a connection, and wait for a response
+        response_received = False
+        while not response_received:
+            logger.info("Sending connection request...")
+            body = b'\x01QUAKE\x00\x03'
+            header_fmt = ">HH"
+            header_size = struct.calcsize(header_fmt)
+            header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
+            self._udp.sendto(header + body, (host, port))
+            try:
+                packet, addr = await asyncio.wait_for(self._udp.recvfrom(), 1.0)
+                response_received = True
+            except asyncio.TimeoutError:
+                pass
 
-        # Wait for, and parse the response.
-        packet, addr = await self._udp.recvfrom()
+        # Parse the response.
         if addr != (host, port):
             raise DatagramError("Spoofed packet received")
         netflags, size = struct.unpack(header_fmt, packet[:header_size])
@@ -130,12 +145,16 @@ class DatagramConnection:
             raise DatagramError(f"Unexpected packet length {len(body)}")
         self._port, = struct.unpack("<L", body[1:])
         self._host = host
+        logger.info("Connected")
 
         # Spin up required tasks.
         self._send_reliable_task = asyncio.create_task(self._send_reliable_loop())
         self._recv_task = asyncio.create_task(self._recv_loop())
         self._send_reliable_task.add_done_callback(lambda fut: fut.result())
         self._recv_task.add_done_callback(lambda fut: fut.result())
+
+        asyncio.create_task(self._monitor_queues()).add_done_callback(
+                lambda fut: fut.result())
 
     @classmethod
     async def connect(cls, host, port):
@@ -152,7 +171,7 @@ class DatagramConnection:
         await asyncio.gather(self._send_reliable_task, self._recv_task)
 
     def _encap_packet(self, netflags, seq_num, payload):
-        logging.debug("Sending packet: %s, %s, %s", netflags, seq_num, payload)
+        logger.debug("Sending packet: %s, %s, %s", netflags, seq_num, payload)
         header_fmt = ">HHL"
         header_size = struct.calcsize(header_fmt)
         header = struct.pack(header_fmt,
@@ -223,7 +242,7 @@ class DatagramConnection:
             netflags, size, seq_num = struct.unpack(header_fmt, packet[:header_size])
             netflags = _NetFlags(netflags)
             body = packet[header_size:]
-            logging.debug("Received packet: %s %s %s", netflags, seq_num, body)
+            logger.debug("Received packet: %s %s %s", netflags, seq_num, body)
 
             if len(packet) != size:
                 raise DatagramError(f"Packet size {len(packet)} does not "
@@ -234,10 +253,10 @@ class DatagramConnection:
 
             if _NetFlags.UNRELIABLE in netflags:
                 if seq_num < unreliable_recv_seq:
-                    logging.warning("Stale unreliable message received")
+                    logger.warning("Stale unreliable message received")
                 else:
                     if seq_num != unreliable_recv_seq:
-                        logging.warning("Skipped %s unreliable messages",
+                        logger.warning("Skipped %s unreliable messages",
                                         self._unreliable_recv_seq - seq_num)
                     unreliable_recv_seq = seq_num + 1
                     await self._message_queue.put(body)
@@ -246,7 +265,7 @@ class DatagramConnection:
             elif _NetFlags.DATA in netflags:
                 self._send_ack(seq_num)
                 if seq_num != recv_seq:
-                    logging.warning("Duplicate reliable message received")
+                    logger.warning("Duplicate reliable message received")
                 else:
                     reliable_msg += body
                     recv_seq += 1
@@ -270,6 +289,6 @@ async def _async_main():
 
 
 def main():
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG)
     asyncio.run(_async_main())
 

@@ -30,7 +30,7 @@ from . import dgram
 logger = logging.getLogger()
 
 
-class NetworkError(Exception):
+class ClientError(Exception):
     pass
 
 
@@ -45,47 +45,113 @@ def _make_move_body(yaw, pitch, roll, forward, side, up, buttons, impulse):
                        forward, side, up, buttons, impulse)
 
 
-async def _do_movements(conn):
+class AsyncClient:
+    def __init__(self, conn):
+        self._conn = conn
+        self._spawned_fut = asyncio.Future()
+        self.level_name = None
+        self.view_entity = None
+        self.player_origin = None
+        self.time = None
+        self._moved_fut = asyncio.Future()
+
+    async def _read_messages(self):
+        while True:
+            msg = await self._conn.read_message()
+            while msg:
+                parsed, msg = proto.ServerMessage.parse_message(msg)
+                logger.debug("Got message: %s", parsed)
+
+                # Player goes "unspawned" when server info received (see SV_SendServerinfo).
+                if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
+                    self.level_name = parsed.level_name
+                    self.view_entity = None
+
+                # Handle sign-on.
+                if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
+                    if parsed.num == 1:
+                        await self._conn.send_reliable(_make_cmd_body("prespawn"))
+                    elif parsed.num == 2:
+                        body = (_make_cmd_body('name "pyquake"\n') +
+                                _make_cmd_body("color 0 0\n") +
+                                _make_cmd_body("spawn "))
+                        await self._conn.send_reliable(body)
+                    elif parsed.num == 3:
+                        await self._conn.send_reliable(_make_cmd_body("begin"))
+                        logging.info("Spawned")
+                        self._spawned_fut.set_result(None)
+                        self._spawned_fut = asyncio.Future()
+
+                # Set view entity
+                if parsed.msg_type == proto.ServerMessageType.SETVIEW:
+                    self.view_entity = parsed.viewentity 
+
+                # Update player's position
+                if parsed.msg_type == proto.ServerMessageType.UPDATE:
+                    if self.view_entity is None:
+                        raise ClientError("View entity not set but update received")
+                    if parsed.entity_num == self.view_entity:
+                        self._moved_fut.set_result(parsed.origin)
+                        self._moved_fut = asyncio.Future()
+
+                if parsed.msg_type == proto.ServerMessageType.TIME:
+                    self.time = parsed.time
+
+    async def wait_for_movement(self):
+        return await self._moved_fut
+
+    async def wait_until_spawn(self):
+        await self._spawned_fut
+
+    @classmethod
+    async def connect(cls, host, port):
+        conn = await aiodgram.DatagramConnection.connect(host, port)
+        client = cls(conn)
+        asyncio.create_task(client._read_messages()).add_done_callback(
+                lambda fut: fut.result)
+        return client
+
+    def move(self, yaw, pitch, roll, forward, side, up, buttons, impulse):
+        self._conn.send(_make_move_body(yaw, pitch, roll,
+                                  forward, side, up, buttons, impulse))
+
+    async def send_command(self, cmd):
+        await self._conn.send_reliable(_make_cmd_body(cmd))
+
+    async def disconnect(self):
+        self._conn.disconnect()
+
+
+async def _monitor_movements(client):
     while True:
-        logging.info("Forward")
-        conn.send(_make_move_body(0, 0, 0, 10000, 0, 0, 0, 0))
-        await asyncio.sleep(1)
-        logging.info("Back")
-        conn.send(_make_move_body(0, 0, 0, -10000, 0, 0, 0, 0))
-        await asyncio.sleep(1)
+        origin = await client.wait_for_movement()
+        logging.debug("Player moved to %s", origin)
 
 
 async def _aioclient():
     host, port = "localhost", 26000
 
-    conn = await aiodgram.DatagramConnection.connect(host, port)
-
+    client = await AsyncClient.connect(host, port)
     logger.info("Connected to %s %s", host, port)
 
+    asyncio.ensure_future(_monitor_movements(client)).add_done_callback(
+            lambda fut: fut.result)
+
     try:
+        await client.wait_until_spawn()
         while True:
-            msg = await conn.read_message()
-            while msg:
-                parsed, msg = proto.ServerMessage.parse_message(msg)
-                logger.debug("Got message: %s", parsed)
-                if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
-                    if parsed.num == 1:
-                        await conn.send_reliable(_make_cmd_body("prespawn"))
-                    elif parsed.num == 2:
-                        body = (_make_cmd_body('name "pyquake"\n') +
-                                _make_cmd_body("color 0 0\n") +
-                                _make_cmd_body("spawn "))
-                        await conn.send_reliable(body)
-                    elif parsed.num == 3:
-                        await conn.send_reliable(_make_cmd_body("begin"))
-                        logging.info("Signon complete")
-                        asyncio.create_task(_do_movements(conn)).add_done_callback(
-                            lambda fut: fut.result())
+            logging.info("Forward")
+            client.move(0, 0, 0, 10000, 0, 0, 0, 0)
+            await asyncio.sleep(1)
+            logging.info("Back")
+            client.move(0, 0, 0, -10000, 0, 0, 0, 0)
+            await asyncio.sleep(1)
     finally:
-        conn.disconnect()
+        await client.disconnect()
+
 
 def aioclient_main():
-    logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(_aioclient())
 
 def client_main():
