@@ -21,6 +21,7 @@
 import asyncio
 import logging
 import struct
+import time
 
 from . import aiodgram
 from . import proto
@@ -43,6 +44,10 @@ def _make_move_body(yaw, pitch, roll, forward, side, up, buttons, impulse):
                        3, 0.,
                        pitch, yaw, roll,
                        forward, side, up, buttons, impulse)
+
+
+def _patch_vec(old_vec, update):
+    return tuple(v if u is None else u for v, u in zip(old_vec, update))
 
 
 class AsyncClient:
@@ -87,11 +92,17 @@ class AsyncClient:
                     self.view_entity = parsed.viewentity 
 
                 # Update player's position
+                if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
+                    if self.view_entity is None:
+                        raise ClientError("View entity not set but spawnbaseline received")
+                    if parsed.entity_num == self.view_entity:
+                        self.player_origin = parsed.origin
                 if parsed.msg_type == proto.ServerMessageType.UPDATE:
                     if self.view_entity is None:
                         raise ClientError("View entity not set but update received")
                     if parsed.entity_num == self.view_entity:
-                        self._moved_fut.set_result(parsed.origin)
+                        self.player_origin = _patch_vec(self.player_origin, parsed.origin)
+                        self._moved_fut.set_result(self.player_origin)
                         self._moved_fut = asyncio.Future()
 
                 if parsed.msg_type == proto.ServerMessageType.TIME:
@@ -139,6 +150,13 @@ async def _aioclient():
 
     try:
         await client.wait_until_spawn()
+        start = time.perf_counter()
+        for i in range(10000):
+            client.move(0, 0, 0, 400, 0, 0, 0, 0)
+            origin = await client.wait_for_movement()
+        logging.info("Took %s seconds", time.perf_counter() - start)
+
+        """
         while True:
             logging.info("Forward")
             client.move(0, 0, 0, 10000, 0, 0, 0, 0)
@@ -146,6 +164,7 @@ async def _aioclient():
             logging.info("Back")
             client.move(0, 0, 0, -10000, 0, 0, 0, 0)
             await asyncio.sleep(1)
+        """
     finally:
         await client.disconnect()
 

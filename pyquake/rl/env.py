@@ -23,10 +23,12 @@ _QUAKE_OPTION_ARGS = [
     '-protocol', '15',
     '-dedicated', '1',
     '-basedir', os.path.expanduser('~/.quakespasm'),
-    '+host_framerate', '0.013888',
-    '+sys_ticrate', '0.013888',
+    #'+host_framerate', '0.013888',
+    '+host_framerate', '0.1',
+    '+sys_ticrate', '0.0',
     '+sync_movements', '1',
-    '+no_monsters', '1',
+    '+nomonsters', '1',
+    '+map', 'e1m1',
 ]
 
 
@@ -71,12 +73,12 @@ class _Client(multiprocessing.Process):
 
         while True:
             func, *args = await loop.run_in_executor(None, lambda: self._in_q.get())
-            asyncio.ensure_future(getattr(self, func)(*args))
+            await getattr(self, func)(*args)
 
     async def _read_movements(self):
         while True:
             pos = await self._client.wait_for_movement()
-            self._out_q.put((self._client.time, pos))
+            self._out_q.put((self._client.time, np.array(pos)))
 
     async def _run_coro(self):
         self._client = await client.AsyncClient.connect(self._host, self._port)
@@ -108,7 +110,7 @@ class GuidedEnv(gym.Env):
     def __init__(self, demo_file):
         guide_origins, _ = _get_player_origins(demo_file)
         self.action_space = gym.spaces.Discrete(4)
-        self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(3,),
+        self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(7,),
                                                 dtype=np.float32)
 
         self._pm = progress.ProgressMap(guide_origins, 250)
@@ -123,7 +125,11 @@ class GuidedEnv(gym.Env):
         self._client_proc = _Client("localhost", port, self._send_q, self._recv_q)
         self._client_proc.start()
 
+        self._reset_episode()
+
+    def _reset_episode(self):
         self._prev_progress = 0.
+        self._prev_dist = 0.
         self._pos = None
 
     def step(self, a):
@@ -141,23 +147,36 @@ class GuidedEnv(gym.Env):
             self._recv_q.get()
 
         self._send_q.put(("move", 0, 0, 0, *v, 0, 0, 0))
-        time, self._pos = self._recv_q.get()
+        time, new_pos = self._recv_q.get()
+
+        if self._pos is not None:
+            self._vel = new_pos - self._pos
+        else:
+            self._vel = np.zeros_like(new_pos)
+        self._pos = new_pos
 
         assert self._recv_q.empty()
 
         (closest_point,), (progress,) = self._pm.get_progress(np.array([self._pos]))
-        reward = progress - self._prev_progress
+        dist = (np.linalg.norm(closest_point - self._pos) / 16) ** 2
+        reward = (progress - self._prev_progress) - (dist - self._prev_dist)
         self._prev_progress = progress
-        state = np.array([self._pos])
+        self._prev_dist = dist
+        state = np.array([np.concatenate([self._pos, self._vel, [time]])])
+        state = state.squeeze()
         done = time > _TIME_LIMIT
-
-        return state, reward, done, {}, progress
+        logger.debug("time:%.2f progress %.2f pos:%s vel:%s",
+                     time, progress, self._pos, self._vel)
+        return state, reward, done, {}
 
     def reset(self):
         self._send_q.put(("kill",))
+        self._reset_episode()
+        obs, _, _, _ = self.step(2)
+        return obs
 
     def render(self):
-        print(self._pos)
+        print(self._pos, self._vel)
         
     def close(self):
         self._client_proc.terminate()
