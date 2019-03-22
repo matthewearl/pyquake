@@ -17,7 +17,7 @@ from .. import progress
 logger = logging.getLogger(__name__)
 
 
-_TIME_LIMIT = 30.
+_TIME_LIMIT = 15.
 _QUAKE_EXE = os.path.expanduser("~/Quakespasm/quakespasm/Quake/quakespasm")
 _QUAKE_OPTION_ARGS = [
     '-protocol', '15',
@@ -110,7 +110,7 @@ class GuidedEnv(gym.Env):
     def __init__(self, demo_file):
         guide_origins, _ = _get_player_origins(demo_file)
         self.action_space = gym.spaces.Discrete(4)
-        self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(7,),
+        self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(11,),
                                                 dtype=np.float32)
 
         self._pm = progress.ProgressMap(guide_origins, 250)
@@ -125,12 +125,15 @@ class GuidedEnv(gym.Env):
         self._client_proc = _Client("localhost", port, self._send_q, self._recv_q)
         self._client_proc.start()
 
+        self._paths = []
+
         self._reset_episode()
 
     def _reset_episode(self):
         self._prev_progress = 0.
         self._prev_dist = 0.
         self._pos = None
+        self._paths.append([])
 
     def step(self, a):
         if a == 0:
@@ -158,16 +161,34 @@ class GuidedEnv(gym.Env):
         assert self._recv_q.empty()
 
         (closest_point,), (progress,) = self._pm.get_progress(np.array([self._pos]))
-        dist = (np.linalg.norm(closest_point - self._pos) / 16) ** 2
-        reward = (progress - self._prev_progress) - (dist - self._prev_dist)
+        dist = (np.linalg.norm(closest_point - self._pos) / 32) ** 2
+        reward = (progress - self._prev_progress) - 0 * (dist - self._prev_dist)
         self._prev_progress = progress
         self._prev_dist = dist
-        state = np.array([np.concatenate([self._pos, self._vel, [time]])])
+
+        #state = np.array([np.concatenate([self._pos, self._vel, [time]])])
+        dir_ = self._pm.get_dir(progress)
+        offset = self._pos - closest_point
+        state = np.concatenate([offset,
+                                self._vel,
+                                dir_,
+                                [progress],
+                               [time]])
+
         state = state.squeeze()
         done = time > _TIME_LIMIT
         logger.debug("time:%.2f progress %.2f pos:%s vel:%s",
                      time, progress, self._pos, self._vel)
-        return state, reward, done, {}
+
+        info = {'time': time,
+                'pos': self._pos,
+                'vel': self._vel,
+                'progress': progress,
+                'offset': offset,
+                'dist': dist,
+                'dir': dir_}
+        self._paths[-1].append(info)
+        return state, reward, done, info
 
     def reset(self):
         self._send_q.put(("kill",))

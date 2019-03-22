@@ -18,6 +18,7 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import bisect
 
 import numpy as np
 import scipy.interpolate
@@ -44,6 +45,14 @@ class ProgressMap:
         distances /= distances[-1]
         f = scipy.interpolate.interp1d(distances, reference_positions, axis=0)
         self._ref = np.array([f(x) for x in np.arange(0, num_segments + 1) / num_segments])
+
+    def get_dir(self, progress):
+        # @@@ TODO: Vectorize
+        dists = _path_distances(self._ref)
+        seg_idx = bisect.bisect_right(dists, progress) - 1
+        seg_idx = np.clip(seg_idx, 0, len(self._ref) - 2)
+        dir_ =  self._ref[seg_idx + 1] - self._ref[seg_idx]
+        return dir_ / np.linalg.norm(dir_)
 
     def get_progress(self, origins):
         # segment_dirs.shape == (num_segments, 3)
