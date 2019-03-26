@@ -105,6 +105,11 @@ class AsyncClient:
                         self._moved_fut.set_result(self.player_origin)
                         self._moved_fut = asyncio.Future()
 
+                if parsed.msg_type == proto.ServerMessageType.PRINT:
+                    logging.info("Print: %s", parsed.string)
+                if parsed.msg_type == proto.ServerMessageType.CENTERPRINT:
+                    logging.info("Center print: %s", parsed.string)
+
                 if parsed.msg_type == proto.ServerMessageType.TIME:
                     self.time = parsed.time
 

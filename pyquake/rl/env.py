@@ -17,8 +17,8 @@ from .. import progress
 logger = logging.getLogger(__name__)
 
 
-_TIME_LIMIT = 15.
-_QUAKE_EXE = os.path.expanduser("~/Quakespasm/quakespasm/Quake/quakespasm")
+_TIME_LIMIT = 30.
+_QUAKE_EXE = os.path.expanduser("~/quakespasm/quakespasm/Quake/quakespasm")
 _QUAKE_OPTION_ARGS = [
     '-protocol', '15',
     '-dedicated', '1',
@@ -110,7 +110,7 @@ class GuidedEnv(gym.Env):
     def __init__(self, demo_file):
         guide_origins, _ = _get_player_origins(demo_file)
 
-        self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(11,),
+        self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(13,),
                                                 dtype=np.float32)
 
         self.action_space = self.get_action_space()
@@ -131,6 +131,7 @@ class GuidedEnv(gym.Env):
         self._reset_episode()
 
     def _reset_episode(self):
+        self._client_yaw = 0
         self._prev_progress = 0.
         self._prev_dist = 0.
         self._pos = None
@@ -149,7 +150,9 @@ class GuidedEnv(gym.Env):
             logger.warning("Removing superfluous queue item")
             self._recv_q.get()
 
-        self._send_q.put(("move",) + self.convert_action(a))
+        move_args = self.convert_action(a)
+        self._client_yaw = move_args[0]
+        self._send_q.put(("move", *move_args))
         time, new_pos = self._recv_q.get()
 
         if self._pos is not None:
@@ -169,8 +172,10 @@ class GuidedEnv(gym.Env):
         #state = np.array([np.concatenate([self._pos, self._vel, [time]])])
         dir_ = self._pm.get_dir(progress)
         offset = self._pos - closest_point
+        yaw_theta = np.pi * (self._client_yaw / 128)
         state = np.concatenate([offset,
                                 self._vel,
+                                [np.cos(yaw_theta), np.sin(yaw_theta)],
                                 dir_,
                                 [progress],
                                [time]])
@@ -183,6 +188,8 @@ class GuidedEnv(gym.Env):
         info = {'time': time,
                 'pos': self._pos,
                 'vel': self._vel,
+                'client_yaw': self._client_yaw,
+                'yaw_theta': 180. * yaw_theta / np.pi,
                 'progress': progress,
                 'offset': offset,
                 'dist': dist,
@@ -205,29 +212,46 @@ class GuidedEnv(gym.Env):
         self._server_proc.terminate()
         self._server_proc.wait()
 
+
 class ArrowsOnlyGuidedEnv(GuidedEnv):
+    key_to_dir = [(0, -1000), (1000, -1000), (1000, 0), (1000, 1000), (0, 1000),
+                  (-1000, 1000), (-1000, 0), (-1000, -1000)]
     def get_action_space(self):
-        return gym.spaces.Discrete(4)
+        return gym.spaces.Discrete(8)
 
     def convert_action(self, a):
-        if a == 0:
-            v = (10000, 0)
-        elif a == 1:
-            v = (-10000, 0)
-        elif a == 2:
-            v = (0, 10000)
-        elif a == 3:
-            v = (0, -10000)
-        
-        return (0, 0, 0, *v, 0, 0, 0)
+        return (0, 0, 0, *self.key_to_dir[a], 0, 0, 0)
+
+
+class KeysOnlyGuidedEnv(GuidedEnv):
+    #dirs = [(0, -1000), (1000, -1000), (1000, 0), (1000, 1000), (0, 1000)]
+    #yaw_speeds = [-16, 2, 0, 2, 16]
+    dirs = [(1000, 0)]
+    yaw_speeds = [-16, 0, 16]
+
+    def __init__(self, demo_file):
+        super().__init__(demo_file)
+
+    def get_action_space(self):
+        return gym.spaces.Discrete(len(self.dirs) * len(self.yaw_speeds))
+
+    def reset(self):
+        self.yaw = 0.
+        super().reset()
+
+    def convert_action(self, a):
+        dir_keys, yaw_speed_keys = a % len(self.dirs), a // len(self.dirs)
+        self.yaw = int((self.yaw + self.yaw_speeds[yaw_speed_keys]) % 256)
+
+        return (self.yaw, 0, 0, *self.dirs[dir_keys], 0, 0, 0)
 
 
 class NoJumpGuidedEnv(GuidedEnv):
     key_to_dir = [(0, -700), (400, -700), (400, 0), (400, 700), (0, 700)]
     def get_action_space(self):
-        return gym.spaces.Tuple(
+        return gym.spaces.Tuple([
                     gym.spaces.Discrete(5),
-                    gym.spaces.Box(0, 256, (1,)))
+                    gym.spaces.Box(0, 256, (1,))])
                     
     def convert_action(self, a):
         keys, yaw = a
@@ -237,6 +261,10 @@ class NoJumpGuidedEnv(GuidedEnv):
 
 
 gym.envs.registration.register(
-    id='pyquake-guided-v0',
-    entry_point='pyquake.rl.env:GuidedEnv',
+    id='pyquake-arrows-only-v0',
+    entry_point='pyquake.rl.env:ArrowsOnlyGuidedEnv',
+)
+gym.envs.registration.register(
+    id='pyquake-keys-only-v0',
+    entry_point='pyquake.rl.env:KeysOnlyGuidedEnv',
 )
