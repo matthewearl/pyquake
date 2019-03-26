@@ -109,10 +109,11 @@ class _Client(multiprocessing.Process):
 class GuidedEnv(gym.Env):
     def __init__(self, demo_file):
         guide_origins, _ = _get_player_origins(demo_file)
-        self.action_space = gym.spaces.Discrete(4)
+
         self.observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(11,),
                                                 dtype=np.float32)
 
+        self.action_space = self.get_action_space()
         self._pm = progress.ProgressMap(guide_origins, 250)
 
         port = _get_free_udp_port(26000, 1000)
@@ -135,21 +136,20 @@ class GuidedEnv(gym.Env):
         self._pos = None
         self._paths.append([])
 
-    def step(self, a):
-        if a == 0:
-            v = (10000, 0)
-        elif a == 1:
-            v = (-10000, 0)
-        elif a == 2:
-            v = (0, 10000)
-        elif a == 3:
-            v = (0, -10000)
+    def get_action_space(self):
+        """Get the action space for this environment."""
+        raise NotImplementedError
 
+    def convert_action(self, a):
+        """Convert an OpenAI action into `move` command parameters."""
+        raise NotImplementedError
+
+    def step(self, a):
         while not self._recv_q.empty():
             logger.warning("Removing superfluous queue item")
             self._recv_q.get()
 
-        self._send_q.put(("move", 0, 0, 0, *v, 0, 0, 0))
+        self._send_q.put(("move",) + self.convert_action(a))
         time, new_pos = self._recv_q.get()
 
         if self._pos is not None:
@@ -204,6 +204,36 @@ class GuidedEnv(gym.Env):
         self._client_proc.join()
         self._server_proc.terminate()
         self._server_proc.wait()
+
+class ArrowsOnlyGuidedEnv(GuidedEnv):
+    def get_action_space(self):
+        return gym.spaces.Discrete(4)
+
+    def convert_action(self, a):
+        if a == 0:
+            v = (10000, 0)
+        elif a == 1:
+            v = (-10000, 0)
+        elif a == 2:
+            v = (0, 10000)
+        elif a == 3:
+            v = (0, -10000)
+        
+        return (0, 0, 0, *v, 0, 0, 0)
+
+
+class NoJumpGuidedEnv(GuidedEnv):
+    key_to_dir = [(0, -700), (400, -700), (400, 0), (400, 700), (0, 700)]
+    def get_action_space(self):
+        return gym.spaces.Tuple(
+                    gym.spaces.Discrete(5),
+                    gym.spaces.Box(0, 256, (1,)))
+                    
+    def convert_action(self, a):
+        keys, yaw = a
+        yaw = int(yaw % 256)
+        dir_ = self.key_to_dir[keys]
+        return (yaw, 0, 0, *dir_, 0, 0, 0)
 
 
 gym.envs.registration.register(

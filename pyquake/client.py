@@ -139,6 +139,15 @@ async def _monitor_movements(client):
         logging.debug("Player moved to %s", origin)
 
 
+async def _perf_benchmark(client):
+    """Benchmark for measuring the move-rate with sync_movements 1."""
+    start = time.perf_counter()
+    for i in range(10000):
+        client.move(0, 0, 0, 400, 0, 0, 0, 0)
+        origin = await client.wait_for_movement()
+    logging.info("Took %s seconds", time.perf_counter() - start)
+
+
 async def _aioclient():
     host, port = "localhost", 26000
 
@@ -150,21 +159,12 @@ async def _aioclient():
 
     try:
         await client.wait_until_spawn()
-        start = time.perf_counter()
-        for i in range(10000):
-            client.move(0, 0, 0, 400, 0, 0, 0, 0)
-            origin = await client.wait_for_movement()
-        logging.info("Took %s seconds", time.perf_counter() - start)
 
-        """
         while True:
-            logging.info("Forward")
-            client.move(0, 0, 0, 10000, 0, 0, 0, 0)
+            for i in range(255):
+                client.move(i, 0, 0, 0, 0, 0, 0, 0)
+                await asyncio.sleep(1/255.)
             await asyncio.sleep(1)
-            logging.info("Back")
-            client.move(0, 0, 0, -10000, 0, 0, 0, 0)
-            await asyncio.sleep(1)
-        """
     finally:
         await client.disconnect()
 
