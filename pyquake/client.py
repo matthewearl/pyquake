@@ -136,6 +136,7 @@ class AsyncClient:
 
     async def disconnect(self):
         self._conn.disconnect()
+        await self._conn.wait_until_disconnected()
 
 
 async def _monitor_movements(client):
@@ -166,17 +167,18 @@ async def _aioclient():
         await client.wait_until_spawn()
 
         while True:
-            for i in range(255):
-                client.move(i, 0, 0, 0, 0, 0, 0, 0)
-                await asyncio.sleep(1/255.)
+            client.move(0, 0, 0, 100, 0, 0, 0, 0)
+            await asyncio.sleep(1)
+            client.move(0, 0, 0, -100, 0, 0, 0, 0)
             await asyncio.sleep(1)
     finally:
         await client.disconnect()
 
 
 def aioclient_main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)-15s %(message)s')
     asyncio.run(_aioclient())
+
 
 def client_main():
     logging.getLogger().setLevel(logging.INFO)

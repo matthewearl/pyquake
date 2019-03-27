@@ -148,13 +148,10 @@ class DatagramConnection:
         logger.info("Connected")
 
         # Spin up required tasks.
-        self._send_reliable_task = asyncio.create_task(self._send_reliable_loop())
-        self._recv_task = asyncio.create_task(self._recv_loop())
-        self._send_reliable_task.add_done_callback(lambda fut: fut.result())
-        self._recv_task.add_done_callback(lambda fut: fut.result())
-
-        asyncio.create_task(self._monitor_queues()).add_done_callback(
-                lambda fut: fut.result())
+        self._tasks = asyncio.gather(
+            asyncio.create_task(self._send_reliable_loop()),
+            asyncio.create_task(self._recv_loop()),
+            asyncio.create_task(self._monitor_queues()))
 
     @classmethod
     async def connect(cls, host, port):
@@ -168,7 +165,10 @@ class DatagramConnection:
         return conn
 
     async def wait_until_disconnected(self):
-        await asyncio.gather(self._send_reliable_task, self._recv_task)
+        try:
+            await self._tasks
+        except asyncio.CancelledError:
+            pass
 
     def _encap_packet(self, netflags, seq_num, payload):
         logger.debug("Sending packet: %s, %s, %s", netflags, seq_num, payload)
@@ -279,6 +279,7 @@ class DatagramConnection:
 
     def disconnect(self):
         self.send(b'\x02')
+        self._tasks.cancel()
 
 
 async def _async_main():

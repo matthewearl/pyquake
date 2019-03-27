@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 _TIME_LIMIT = 30.
-_QUAKE_EXE = os.path.expanduser("~/quakespasm/quakespasm/Quake/quakespasm")
+_QUAKE_EXE = os.path.expanduser("~/Quakespasm/quakespasm/Quake/quakespasm")
 _QUAKE_OPTION_ARGS = [
     '-protocol', '15',
     '-dedicated', '1',
@@ -125,7 +125,8 @@ class AsyncEnv(multiprocessing.Process):
 
     async def _run_coro(self):
         port = _get_free_udp_port(26000, 1000)
-        server_proc = await asyncio.create_subprocess_exec(*_get_quake_args(port))
+        server_proc = await asyncio.create_subprocess_exec(*_get_quake_args(port),
+                                stdin=subprocess.PIPE)
         self._client = await client.AsyncClient.connect("localhost", port)
         logger.info("Connected to %s %s", "localhost", port)
         try:
@@ -137,8 +138,13 @@ class AsyncEnv(multiprocessing.Process):
             await server_proc.wait()
 
     def run(self):
-        self._coro = self._run_coro()
-        asyncio.run(self._coro)
+        async def create_and_run_task():
+            self._coro = asyncio.create_task(self._run_coro())
+            try:
+                await self._coro
+            except asyncio.CancelledError:
+                pass
+        asyncio.run(create_and_run_task())
 
     async def step(self, a):
         raise NotImplementedError
@@ -158,7 +164,6 @@ class AsyncEnv(multiprocessing.Process):
 
     async def close(self):
         self._coro.cancel()
-        await self._coro
 
 
 class AsyncEnvAdaptor(gym.Env):
@@ -190,7 +195,7 @@ class AsyncEnvAdaptor(gym.Env):
 
     def close(self):
         self._make_rpc_call('close', ())
-        self._async_env_proc.wait()
+        self._async_env_proc.join()
 
 
 
@@ -245,7 +250,6 @@ class AsyncGuidedEnv(AsyncEnv):
         self._old_pos = pos
         self._prev_progress = progress
 
-        obs = info
         return obs, reward, done, info
 
     def _get_initial_observation(self):
