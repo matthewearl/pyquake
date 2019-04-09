@@ -18,8 +18,8 @@ from .. import progress
 logger = logging.getLogger(__name__)
 
 
-_TIME_LIMIT = 30.
-_QUAKE_EXE = os.path.expanduser("~/Quakespasm/quakespasm/Quake/quakespasm")
+_TIME_LIMIT = 35.
+_QUAKE_EXE = os.path.expanduser("~/quakespasm/quakespasm/Quake/quakespasm")
 _QUAKE_OPTION_ARGS = [
     '-protocol', '15',
     '-dedicated', '1',
@@ -63,8 +63,7 @@ class AsyncEnv(multiprocessing.Process):
         super().__init__()
         self.parent_conn, self.child_conn = multiprocessing.Pipe()
         self._server_proc = None
-
-        self._reset_per_episode_state()
+        self._client = None
 
     async def _handle_rpc(self):
         loop = asyncio.get_running_loop()
@@ -75,10 +74,19 @@ class AsyncEnv(multiprocessing.Process):
             self.child_conn.send(return_val)
 
     async def _run_coro(self):
-        port = _get_free_udp_port(26000, 1000)
-        server_proc = await asyncio.create_subprocess_exec(*_get_quake_args(port),
+        # TODO: Obtain a file lock around checking the port and creating the server, to avoid race conditions, and get
+        # rid of the os.getpid() hack.
+        import random
+        port = 26000 + random.randint(0, 1000 - 1)
+        port = _get_free_udp_port(port, 1000)
+
+        server_proc = await asyncio.create_subprocess_exec(
+                                *_get_quake_args(port),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
                                 stdin=subprocess.PIPE)
         self._client = await client.AsyncClient.connect("localhost", port)
+        self._reset_per_episode_state()
         logger.info("Connected to %s %s", "localhost", port)
         try:
             await self._client.wait_until_spawn()
@@ -100,7 +108,7 @@ class AsyncEnv(multiprocessing.Process):
     async def step(self, a):
         raise NotImplementedError
 
-    def _get_initial_observation(self):
+    async def _get_initial_observation(self):
         raise NotImplementedError
 
     def _reset_per_episode_state(self):
@@ -111,7 +119,7 @@ class AsyncEnv(multiprocessing.Process):
         await self._client.send_command("kill")
         await spawn_fut
         self._reset_per_episode_state()
-        return self._get_initial_observation()
+        return await self._get_initial_observation()
 
     async def close(self):
         self._coro.cancel()
@@ -128,6 +136,8 @@ class AsyncEnvAdaptor(gym.Env):
         self._rpc_lock = threading.Lock()
 
         self._async_env_proc.start()
+        self._paths = []
+        self._current_path = None
 
     def _make_rpc_call(self, method, args):
         with self._rpc_lock:
@@ -136,9 +146,15 @@ class AsyncEnvAdaptor(gym.Env):
         return result
 
     def step(self, a):
-        return self._make_rpc_call('step', (a,))
+        obs, reward, done, info = self._make_rpc_call('step', (a,))
+        if self._current_path is None:
+            self._current_path = []
+            self._paths.append(self._current_path)
+        self._current_path.append(info)
+        return obs, reward, done, info
 
     def reset(self):
+        self._current_path = None
         return self._make_rpc_call('reset', ())
 
     def render(self):
@@ -150,10 +166,42 @@ class AsyncEnvAdaptor(gym.Env):
 
 
 class AsyncGuidedEnv(AsyncEnv):
-    key_to_dir = [(0, -1000), (1000, -1000), (1000, 0), (1000, 1000), (0, 1000),
-                  (-1000, 1000), (-1000, 0), (-1000, -1000)]
+    key_to_dir = [(0, -1000),     # 0: Forward
+                  (1000, -1000),  # 1: Forward-right
+                  (1000, 0),      # 2: Right
+                  (1000, 1000),   # 3: Back-right
+                  (0, 1000),      # 4: Back
+                  (-1000, 1000),  # 5: Back-left
+                  (-1000, 0),     # 6: Left
+                  (-1000, -1000)] # 7: Forward-left
     action_space = gym.spaces.Discrete(8)
-    observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(11,), dtype=np.float32)
+    observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(9,), dtype=np.float32)
+
+    center_print_rewards = {
+        'Only 2 more to go': 3000,
+        'Only 1 more to go': 3000,
+        'Sequence completed!': 3000,
+    }
+
+    center_print_progress = {
+        'Only 2 more to go': 5795,
+        'Only 1 more to go': 6273,
+        'Sequence completed!': 6734,
+    }
+
+    movement_rewards = {
+        25: 3000,  # bridge button
+        62: 3000,  # spiral button 1
+        60: 3000,  # spiral button 2
+        61: 3000,  # spiral button 3
+    }
+
+    movement_progress = {
+        25: 4088,
+        62: 5795,  # spiral button 1
+        60: 6273,  # spiral button 2
+        61: 6734,  # spiral button 3
+    }
 
     def __init__(self, demo_file):
         super().__init__()
@@ -166,15 +214,54 @@ class AsyncGuidedEnv(AsyncEnv):
 
     async def step(self, a):
         self._client.move(*self._action_to_move_args(a))
-        await self._client.wait_for_movement()
-        return self._get_step_return_and_update()
+        await self._client.wait_for_movement(self._client.view_entity)
+        return await self._get_step_return_and_update()
 
     def _reset_per_episode_state(self):
+        #self._prev_progress = 5464.89   # spiral
+        #self._prev_progress = 3688.33527211  # draw bridge
         self._prev_progress = 0.
         self._prev_dist = 0.
         self._old_pos = None
+        self._center_prints_seen = set()
+        self._moved = set()
 
-    def _get_step_return_and_update(self):
+    def _limit_progress_by_center_prints(self, progress):
+        for k, v in self.center_print_progress.items():
+            if k not in self._center_prints_seen:
+                progress = min(progress, v)
+        return progress
+
+    def _limit_progress_by_moved(self, progress):
+        for k, v in self.movement_progress.items():
+            moved = (self._client.origins[k] != (0., 0., 0.))
+            if not moved:
+                progress = min(progress, v)
+        return progress
+
+    def _get_movement_rewards(self):
+        reward = 0
+        for k, v in self.movement_rewards.items():
+            if (k not in self._moved and
+                    self._client.origins[k] != (0., 0., 0.)):
+                reward += v
+                self._moved |= {k}
+
+        return reward
+
+    async def _get_center_print_reward(self):
+        print_queue = self._client.center_print_queue
+        reward = 0
+        while print_queue.qsize():
+            string = await print_queue.get()
+            for k, v in self.center_print_rewards.items():
+                if k in string:
+                    logging.info("Center print reward: %r %s", k, v)
+                    reward += v
+                    self._center_prints_seen |= {k}
+        return reward
+
+    async def _get_step_return_and_update(self):
         pos = np.array(self._client.player_origin)
         if self._old_pos is not None:
             vel = pos - self._old_pos
@@ -182,11 +269,31 @@ class AsyncGuidedEnv(AsyncEnv):
             vel = np.zeros_like(pos)
 
         (closest_point,), (progress,) = self._pm.get_progress(np.array([pos]))
+        progress = self._limit_progress_by_center_prints(progress)
+        progress = self._limit_progress_by_moved(progress)
+        if self._client.level_finished:
+            logger.warning("LEVEL FINISHED %s", self._client.time)
+            progress = self._pm.get_distance()
+        closest_point = self._pm.get_pos(progress)
         dir_ = self._pm.get_dir(progress)
         offset = pos - closest_point
-        obs = np.concatenate([offset, vel, dir_, [progress], [self._client.time]])
+        dist = np.linalg.norm(offset)
+        obs = np.concatenate([pos, vel,
+                              [len(self._moved)],
+                              [len(self._center_prints_seen)],
+                              [self._client.time]])
+        #obs = np.concatenate([offset, vel, dir_,
+        #                      [progress],
+        #                      [len(self._moved)],
+        #                      [len(self._center_prints_seen)],
+        #                      [self._client.time]])
 
-        reward = (progress - self._prev_progress)
+        reward = ((progress - self._prev_progress) +
+                  self._get_movement_rewards() +
+                  await self._get_center_print_reward() -
+                  1. * (dist - self._prev_dist))
+        if self._client.level_finished:
+            reward += 100
 
         done = self._client.time > _TIME_LIMIT
 
@@ -195,19 +302,26 @@ class AsyncGuidedEnv(AsyncEnv):
                 'vel': vel,
                 'progress': progress,
                 'offset': offset,
-                'dir': dir_}
+                'dir': dir_,
+                'obs': obs,
+                'reward': reward,
+                'moved': list(self._moved),
+                'center_prints_seen': list(self._center_prints_seen),
+                'finished': self._client.level_finished}
 
         self._old_pos = pos
         self._prev_progress = progress
+        self._prev_dist = dist
 
         return obs, reward, done, info
 
-    def _get_initial_observation(self):
-        obs, reward, done, info = self._get_step_return_and_update()
+    async def _get_initial_observation(self):
+        obs, reward, done, info = await self._get_step_return_and_update()
+        self._reset_per_episode_state()
         return obs
 
 
 gym.envs.registration.register(
-    id='pyquake-arrows-only-v0',
-    entry_point='pyquake.rl.env:AsyncGuidedEnv',
+    id='pyquake-v0',
+    entry_point='pyquake.rl.env:AsyncEnvAdaptor',
 )

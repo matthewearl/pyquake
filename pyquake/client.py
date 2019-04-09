@@ -19,6 +19,7 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import asyncio
+import collections
 import logging
 import struct
 import time
@@ -56,9 +57,15 @@ class AsyncClient:
         self._spawned_fut = asyncio.Future()
         self.level_name = None
         self.view_entity = None
-        self.player_origin = None
+        self.level_finished = False
         self.time = None
-        self._moved_fut = asyncio.Future()
+        self._moved_fut = collections.defaultdict(asyncio.Future)
+        self.center_print_queue = asyncio.Queue()
+        self.origins = {}
+
+    @property
+    def player_origin(self):
+        return self.origins[self.view_entity]
 
     async def _read_messages(self):
         while True:
@@ -71,6 +78,7 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
                     self.level_name = parsed.level_name
                     self.view_entity = None
+                    self.level_finished = False
 
                 # Handle sign-on.
                 if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
@@ -91,30 +99,35 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.SETVIEW:
                     self.view_entity = parsed.viewentity 
 
-                # Update player's position
+                # Update entity positions
                 if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
                     if self.view_entity is None:
                         raise ClientError("View entity not set but spawnbaseline received")
-                    if parsed.entity_num == self.view_entity:
-                        self.player_origin = parsed.origin
+                    self.origins[parsed.entity_num] = parsed.origin
                 if parsed.msg_type == proto.ServerMessageType.UPDATE:
-                    if self.view_entity is None:
-                        raise ClientError("View entity not set but update received")
-                    if parsed.entity_num == self.view_entity:
-                        self.player_origin = _patch_vec(self.player_origin, parsed.origin)
-                        self._moved_fut.set_result(self.player_origin)
-                        self._moved_fut = asyncio.Future()
+                    ent_num = parsed.entity_num
+                    if ent_num in self.origins:
+                        self.origins[ent_num] = _patch_vec(
+                                self.origins[ent_num], parsed.origin)
+
+                        if parsed.entity_num in self._moved_fut:
+                            self._moved_fut[ent_num].set_result(self.origins[ent_num])
+                        self._moved_fut[ent_num] = asyncio.Future()
 
                 if parsed.msg_type == proto.ServerMessageType.PRINT:
                     logging.info("Print: %s", parsed.string)
                 if parsed.msg_type == proto.ServerMessageType.CENTERPRINT:
                     logging.info("Center print: %s", parsed.string)
+                    await self.center_print_queue.put(parsed.string)
 
                 if parsed.msg_type == proto.ServerMessageType.TIME:
                     self.time = parsed.time
 
-    async def wait_for_movement(self):
-        return await self._moved_fut
+                if parsed.msg_type == proto.ServerMessageType.INTERMISSION:
+                    self.level_finished = True
+
+    async def wait_for_movement(self, entity_num):
+        return await self._moved_fut[entity_num]
 
     async def wait_until_spawn(self):
         await self._spawned_fut

@@ -36,7 +36,7 @@ class ProgressMap:
         distances = _path_distances(reference_positions)
 
         # Drop points where there wasn't much change in distance (these tend to make interp1d unhappy).
-        mask = np.concatenate([np.diff(distances) >= 0.000001, [True]])
+        mask = np.concatenate([np.diff(distances) >= 1e-6, [True]])
         distances = distances[mask]
         reference_positions = reference_positions[mask]
         
@@ -51,8 +51,22 @@ class ProgressMap:
         dists = _path_distances(self._ref)
         seg_idx = bisect.bisect_right(dists, progress) - 1
         seg_idx = np.clip(seg_idx, 0, len(self._ref) - 2)
-        dir_ =  self._ref[seg_idx + 1] - self._ref[seg_idx]
+        dir_ = self._ref[seg_idx + 1] - self._ref[seg_idx]
         return dir_ / np.linalg.norm(dir_)
+
+    def get_pos(self, progress):
+        # @@@ TODO: Vectorize
+        dists = _path_distances(self._ref)
+        progress = np.clip(progress, 0, dists[-1])
+        seg_idx = bisect.bisect_right(dists, progress) - 1
+        seg_idx = np.clip(seg_idx, 0, len(self._ref) - 2)
+        seg_len = dists[seg_idx + 1] - dists[seg_idx]
+        return (self._ref[seg_idx] * (dists[seg_idx + 1] - progress) +
+                self._ref[seg_idx + 1] * (progress - dists[seg_idx])) / seg_len
+
+    def get_distance(self):
+        dists = _path_distances(self._ref)
+        return dists[-1]
 
     def get_progress(self, origins):
         # segment_dirs.shape == (num_segments, 3)
