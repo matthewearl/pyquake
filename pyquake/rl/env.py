@@ -175,18 +175,12 @@ class AsyncGuidedEnv(AsyncEnv):
                   (-1000, 0),     # 6: Left
                   (-1000, -1000)] # 7: Forward-left
     action_space = gym.spaces.Discrete(8)
-    observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(9,), dtype=np.float32)
+    observation_space = gym.spaces.Box(-np.inf, np.inf, shape=(11,), dtype=np.float32)
 
     center_print_rewards = {
-        'Only 2 more to go': 3000,
-        'Only 1 more to go': 3000,
-        'Sequence completed!': 3000,
     }
 
     center_print_progress = {
-        'Only 2 more to go': 5795,
-        'Only 1 more to go': 6273,
-        'Sequence completed!': 6734,
     }
 
     movement_rewards = {
@@ -279,8 +273,8 @@ class AsyncGuidedEnv(AsyncEnv):
         offset = pos - closest_point
         dist = np.linalg.norm(offset)
         obs = np.concatenate([pos, vel,
-                              [len(self._moved)],
-                              [len(self._center_prints_seen)],
+                              [k in self._moved
+                                  for k in self.movement_progress],
                               [self._client.time]])
         #obs = np.concatenate([offset, vel, dir_,
         #                      [progress],
