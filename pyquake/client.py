@@ -21,6 +21,7 @@
 import asyncio
 import collections
 import logging
+import math
 import struct
 import time
 
@@ -40,10 +41,14 @@ def _make_cmd_body(cmd):
     return b'\x04' + cmd.encode('ascii') + b'\0'
 
 
-def _make_move_body(yaw, pitch, roll, forward, side, up, buttons, impulse):
+def _encode_angle(angle):
+    return int((angle * 128 / math.pi) % 256)
+
+
+def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse):
     return struct.pack("<BfBBBhhhBB",
                        3, 0.,
-                       pitch, yaw, roll,
+                       _encode_angle(pitch), _encode_angle(yaw), _encode_angle(roll),
                        forward, side, up, buttons, impulse)
 
 
@@ -51,78 +56,42 @@ def _patch_vec(old_vec, update):
     return tuple(v if u is None else u for v, u in zip(old_vec, update))
 
 
-class ZeroLengthQueue:
-    """A Queue-like object that blocks on `put` until the item has been read."""
-    def __init__(self):
-        self._put_fut = asyncio.Future()
-        self._get_fut = None
-
-    async def put(self, x):
-        self._put_fut.set_result(x)
-        self._get_fut = asyncio.Future()
-        await self._get_fut
-        self._get_fut = None
-        self._put_fut = asyncio.Future()
-
-    async def get(self):
-        x = await self._put_fut
-        self._get_fut.set_result(None)
-        return x
-
-
 class Demo:
     def __init__(self):
-        self.queue = ZeroLengthQueue()
-        self.server_info_queue = ZeroLengthQueue()
-
         self._msgs = []
         self._angles = []
-        self._record_task = None
+        self.record_pending = False
+        self.recording_started = False
         self.recording_complete = False
 
-    async def _record(self):
-        try:
-            logger.info("Waiting for server info")
-            await self.server_info_queue.get()
-            logger.info("Recording started")
+    def start_recording(self):
+        self.record_pending = True
 
-            get_server_info_task = asyncio.create_task(self.server_info_queue.get())
-            get_msg_task = asyncio.create_task(self.queue.get())
-            while not get_server_info_task.done():
-                done, pending = await asyncio.wait([get_server_info_task, get_msg_task],
-                                                   return_when=asyncio.FIRST_COMPLETED)
-                assert len(done) == 1
-                if get_msg_task.done():
-                    angles, msg = get_msg_task.result()
-                    self._angles.append(angles)
-                    self._msgs.append(msg)
+    def stop_recording(self):
+        self.record_pending = self.recording_started = False
+        self.recording_complete = True
 
-                    get_msg_task = asyncio.create_task(self.queue.get())
-        finally:
-            logger.info("Recording finished (level ended)")
-            self.recording_complete = True
+    def add_message(self, angles, msg, has_server_info):
+        if self.record_pending:
+            if has_server_info:
+                self.record_pending = False
+                self.recording_started = True
+        elif self.recording_started:
+            if has_server_info:
+                self.recording_started = False
+                self.recording_complete = True
+        elif self.recording_complete:
+            raise Exception("add_message called when recording is complete")
 
-        get_msg_task.cancel()
-        try:
-            await get_msg_task
-        except asyncio.CancelledError:
-            pass
-
-    async def start_recording(self):
-        self._record_task = asyncio.create_task(self._record())
-
-    async def stop_recording(self):
-        self._record_task.cancel()
-        try:
-            await self._record_task
-        except asyncio.CancelledError:
-            logger.info("Recording finished (stop record called)")
+        if self.recording_started:
+            self._msgs.append(msg)
+            self._angles.append(angles)
 
     def dump(self, f, *, recompute_angles=False):
         f.write(b'-1\n')   # cd track
         demo_header_fmt = "<Ifff"
         for msg, angles in zip(self._msgs, self._angles):
-            f.write(struct.pack(demo_header_fmt, len(msg), *angles))
+            f.write(struct.pack(demo_header_fmt, len(msg), *(180. * a / math.pi for a in angles)))
             f.write(msg)
 
 
@@ -148,13 +117,14 @@ class AsyncClient:
     async def record_demo(self):
         d = Demo()
         self._demos.append(d)
-        await d.start_recording()
+        d.start_recording()
         return d
 
     async def _read_messages(self):
         while True:
             remaining_msg = msg = await self._conn.read_message()
 
+            has_server_info = False
             while remaining_msg:
                 parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg)
                 logger.debug("Got message: %s", parsed)
@@ -164,9 +134,7 @@ class AsyncClient:
                     self.level_name = parsed.level_name
                     self.view_entity = None
                     self.level_finished = False
-
-                    await asyncio.gather(*(demo.server_info_queue.put(None) for demo in self._demos))
-                    self._demos = [d for d in self._demos if not d.recording_complete]
+                    has_server_info = True
 
                 # Handle sign-on.
                 if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
@@ -218,8 +186,9 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.INTERMISSION:
                     self.level_finished = True
 
+            self._demos = [d for d in self._demos if not d.recording_complete]
             for demo in self._demos:
-                await demo.queue.put((self._angles, msg))
+                demo.add_message(self._angles, msg, has_server_info)
 
     async def wait_for_movement(self, entity_num):
         return await self._moved_fut[entity_num]
@@ -240,9 +209,9 @@ class AsyncClient:
                 lambda fut: fut.result)
         return client
 
-    def move(self, yaw, pitch, roll, forward, side, up, buttons, impulse):
-        self._angles = (yaw, pitch, roll)
-        self._conn.send(_make_move_body(yaw, pitch, roll,
+    def move(self, pitch, yaw, roll, forward, side, up, buttons, impulse):
+        self._angles = (pitch, yaw, roll)
+        self._conn.send(_make_move_body(pitch, yaw, roll,
                                   forward, side, up, buttons, impulse))
 
     async def send_command(self, cmd):
@@ -255,7 +224,7 @@ class AsyncClient:
 
 async def _monitor_movements(client):
     while True:
-        origin = await client.wait_for_movement()
+        origin = await client.wait_for_movement(client.view_entity)
         logging.debug("Player moved to %s", origin)
 
 
@@ -282,15 +251,15 @@ async def _aioclient():
         await client.wait_until_spawn()
 
         for i in range(3):
-            client.move(0, 0, 0, 100, 0, 0, 0, 0)
+            client.move(*client._angles, 320, 0, 0, 0, 0)
             await asyncio.sleep(1)
-            client.move(0, 0, 0, -100, 0, 0, 0, 0)
+            client.move(*client._angles, -320, 0, 0, 0, 0)
             await asyncio.sleep(1)
             if i == 1:
                 await client.send_command("kill")
                 await asyncio.sleep(1)
         
-        await demo.stop_recording()
+        demo.stop_recording()
         from pprint import pprint
         def decode_msg(msg):
             while msg:
@@ -301,11 +270,11 @@ async def _aioclient():
             demo.dump(f)
     finally:
         await client.disconnect()
-        await demo.stop_recording()
+        demo.stop_recording()
 
 
 def aioclient_main():
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)-15s %(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(message)s')
     asyncio.run(_aioclient())
 
 
