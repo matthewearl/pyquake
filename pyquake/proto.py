@@ -731,6 +731,7 @@ def read_demo_file(f):
             parsed, msg = ServerMessage.parse_message(msg)
             yield view_angles, parsed
 
+
 def demo_parser_main():
     import sys
     with open(sys.argv[1], "rb") as f:

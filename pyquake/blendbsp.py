@@ -33,7 +33,7 @@ _EMISSION_COLORS= {
 _ALL_FULLBRIGHT_IN_OVERLAY = True
 _FULLBRIGHT_OBJECT_OVERLAY = False
 
-_USE_LUXCORE = True
+_USE_LUXCORE = False
 
 
 def _texture_to_array(pal, texture):
@@ -432,6 +432,8 @@ def _load_object(bsp, map_name, do_materials):
 
 
 def load_bsp(pak_root, map_name, do_materials=True):
+    print("hello")
+
     fs = pak.Filesystem(pak_root)
     fname = 'maps/{}.bsp'.format(map_name)
     bsp = Bsp(io.BytesIO(fs[fname]))
