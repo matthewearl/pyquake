@@ -6,10 +6,10 @@
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 #     The above copyright notice and this permission notice shall be included
 #     in all copies or substantial portions of the Software.
-# 
+#
 #     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 #     OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 #     MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
@@ -24,6 +24,8 @@ import logging
 import math
 import struct
 import time
+
+import numpy as np
 
 from . import aiodgram
 from . import proto
@@ -87,12 +89,99 @@ class Demo:
             self._msgs.append(msg)
             self._angles.append(angles)
 
-    def dump(self, f, *, recompute_angles=False):
+    def _parse_messages(self):
+        for msg in self._msgs:
+            parsed_msgs = []
+            remaining_msg = msg
+            while remaining_msg:
+                parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg)
+                parsed_msgs.append(parsed)
+            yield parsed_msgs
+
+    def dump(self, f, *, angle_calculator=None):
         f.write(b'-1\n')   # cd track
         demo_header_fmt = "<Ifff"
-        for msg, angles in zip(self._msgs, self._angles):
+
+        if angle_calculator is not None:
+            all_angles = angle_calculator.calculate(self._parse_messages())
+        else:
+            all_angles = self._angles
+
+        for msg, angles in zip(self._msgs, all_angles):
             f.write(struct.pack(demo_header_fmt, len(msg), *(180. * a / math.pi for a in angles)))
             f.write(msg)
+
+
+class _BaseAngleCalculator:
+    def _angle_difference(self, a, b):
+        t = (a - b) % (np.pi * 2.)
+        return min(t, 2. * np.pi - t)
+
+    def _get_movement_yaws(self, parsed_msg_lists):
+        view_entity = None
+        pos = np.zeros((3,))
+        time = 0.
+        move_time = None
+        yaw = 0.
+
+        for parsed_msgs in parsed_msg_lists:
+            for parsed_msg in parsed_msgs:
+                if parsed_msg.msg_type == proto.ServerMessageType.SETVIEW:
+                    view_entity = parsed_msg.viewentity
+
+                if parsed_msg.msg_type == proto.ServerMessageType.SPAWNBASELINE:
+                    if view_entity is None:
+                        raise ClientError("View entity not set but spawnbaseline received")
+                    pos = parsed_msg.origin
+
+                if parsed_msg.msg_type == proto.ServerMessageType.TIME:
+                    time = parsed_msg.time
+
+                if (parsed_msg.msg_type == proto.ServerMessageType.UPDATE and parsed_msg.entity_num == view_entity):
+                    new_pos = np.array(_patch_vec(pos, parsed_msg.origin))
+                    if move_time is not None:
+                        vel = (new_pos - pos) / (time - move_time)
+                        if np.linalg.norm(vel) > 50:
+                            yaw = np.arctan2(vel[1], vel[0])
+                    move_time = time
+                    pos = new_pos
+
+            yield yaw
+
+
+class AngleCalculatorSmoothed(_BaseAngleCalculator):
+    def _angle_cost(self, movement_yaw, yaw):
+        diff = self._angle_difference(movement_yaw, yaw)
+        if diff < np.pi / 8:
+            return 0
+        return 0.4
+
+    def calculate(self, parsed_msg_lists):
+        paths = [([], 0.)]
+        for j, movement_yaw in enumerate(self._get_movement_yaws(parsed_msg_lists)):
+            new_paths = []
+            for yaw in np.linspace(0., 2. * np.pi, 8, endpoint=False):
+                c = self._angle_cost(movement_yaw, yaw)
+                new_dists = [int(bool(prev_path) and prev_path[-1] != yaw) + c + prev_dist
+                             for prev_path, prev_dist in paths]
+                i = np.argmin(new_dists)
+                new_paths.append((paths[i][0] + [yaw], new_dists[i]))
+            paths = new_paths
+
+        best_path = min(paths, key=lambda p: p[1])[0]
+        return ((0., yaw, 0.) for yaw in best_path)
+
+
+class AngleCalculatorHysteresis(_BaseAngleCalculator):
+    def __init__(self, hysteresis_angle):
+        self._hysteresis_angle = hysteresis_angle
+
+    def calculate(self, parsed_msg_lists):
+        yaw = 0.
+        for movement_yaw in self._get_movement_yaws(parsed_msg_lists):
+            if self._angle_difference(movement_yaw, yaw) > self._hysteresis_angle:
+                yaw = np.pi * round((4 * movement_yaw / np.pi)) / 4
+            yield (0., yaw, 0.)
 
 
 class AsyncClient:
@@ -107,14 +196,14 @@ class AsyncClient:
         self.center_print_queue = asyncio.Queue()
         self.origins = {}
         self._angles = (0., 0., 0.)
-        
+
         self._demos = []
 
     @property
     def player_origin(self):
         return self.origins[self.view_entity]
 
-    async def record_demo(self):
+    def record_demo(self):
         d = Demo()
         self._demos.append(d)
         d.start_recording()
@@ -153,7 +242,7 @@ class AsyncClient:
 
                 # Set view entity
                 if parsed.msg_type == proto.ServerMessageType.SETVIEW:
-                    self.view_entity = parsed.viewentity 
+                    self.view_entity = parsed.viewentity
 
                 # Set view angle
                 if parsed.msg_type == proto.ServerMessageType.SETANGLE:
@@ -212,7 +301,7 @@ class AsyncClient:
     def move(self, pitch, yaw, roll, forward, side, up, buttons, impulse):
         self._angles = (pitch, yaw, roll)
         self._conn.send(_make_move_body(pitch, yaw, roll,
-                                  forward, side, up, buttons, impulse))
+                                        forward, side, up, buttons, impulse))
 
     async def send_command(self, cmd):
         await self._conn.send_reliable(_make_cmd_body(cmd))
@@ -233,7 +322,7 @@ async def _perf_benchmark(client):
     start = time.perf_counter()
     for i in range(10000):
         client.move(0, 0, 0, 400, 0, 0, 0, 0)
-        origin = await client.wait_for_movement()
+        await client.wait_for_movement()
     logging.info("Took %s seconds", time.perf_counter() - start)
 
 
@@ -241,7 +330,7 @@ async def _aioclient():
     host, port = "localhost", 26000
 
     client = await AsyncClient.connect(host, port)
-    demo = await client.record_demo()
+    demo = client.record_demo()
     logger.info("Connected to %s %s", host, port)
 
     asyncio.ensure_future(_monitor_movements(client)).add_done_callback(
@@ -258,9 +347,10 @@ async def _aioclient():
             if i == 1:
                 await client.send_command("kill")
                 await asyncio.sleep(1)
-        
+
         demo.stop_recording()
         from pprint import pprint
+
         def decode_msg(msg):
             while msg:
                 parsed, msg = proto.ServerMessage.parse_message(msg)
@@ -308,4 +398,3 @@ def client_main():
                     conn.send(_make_move_body(0, 0, 0, 0, 0, 0, 3, 0))
     except KeyboardInterrupt:
         conn.disconnect()
-

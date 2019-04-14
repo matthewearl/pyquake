@@ -3,6 +3,7 @@ import errno
 import logging
 import multiprocessing
 import os
+import pickle
 import socket
 import subprocess
 import threading
@@ -86,10 +87,11 @@ class AsyncEnv(multiprocessing.Process):
                                 stderr=subprocess.DEVNULL,
                                 stdin=subprocess.PIPE)
         self._client = await client.AsyncClient.connect("localhost", port)
-        self._reset_per_episode_state()
         logger.info("Connected to %s %s", "localhost", port)
         try:
+            self._before_spawn()
             await self._client.wait_until_spawn()
+            self._reset_per_episode_state()
             await self._handle_rpc()
         finally:
             await self._client.disconnect()
@@ -114,12 +116,21 @@ class AsyncEnv(multiprocessing.Process):
     def _reset_per_episode_state(self):
         raise NotImplementedError
 
+    def _on_episode_end(self):
+        raise NotImplementedError
+
+    def _before_spawn(self):
+        raise NotImplementedError
+
     async def reset(self):
+        self._on_episode_end()
+        self._before_spawn()
         spawn_fut = self._client.wait_until_spawn()
         await self._client.send_command("kill")
         await spawn_fut
+        obs = await self._get_initial_observation()
         self._reset_per_episode_state()
-        return await self._get_initial_observation()
+        return obs
 
     async def close(self):
         self._coro.cancel()
@@ -203,13 +214,30 @@ class AsyncGuidedEnv(AsyncEnv):
         guide_origins, _ = _get_player_origins(demo_file)
         self._pm = progress.ProgressMap(guide_origins, 250)
 
+        self._highest_reward = None
+        self._total_reward = None
+        self._demo = None
+
     def _action_to_move_args(self, a):
         return (0, 0, 0, *self.key_to_dir[a], 0, 0, 0)
 
     async def step(self, a):
         self._client.move(*self._action_to_move_args(a))
         await self._client.wait_for_movement(self._client.view_entity)
-        return await self._get_step_return_and_update()
+        obs, reward, done, info = await self._get_step_return_and_update()
+        self._total_reward += reward
+        return obs, reward, done, info
+
+    def _before_spawn(self):
+        self._demo = self._client.record_demo()
+
+    def _on_episode_end(self):
+        self._demo.stop_recording()
+
+        if self._highest_reward is None or self._total_reward > self._highest_reward:
+            self._highest_reward = self._total_reward
+            with open(f"demos/reward_{self._highest_reward:08.02f}.demo.pickle", "wb") as f:
+                pickle.dump(self._demo, f)
 
     def _reset_per_episode_state(self):
         #self._prev_progress = 5464.89   # spiral
@@ -219,6 +247,7 @@ class AsyncGuidedEnv(AsyncEnv):
         self._old_pos = None
         self._center_prints_seen = set()
         self._moved = set()
+        self._total_reward = 0.
 
     def _limit_progress_by_center_prints(self, progress):
         for k, v in self.center_print_progress.items():
@@ -300,7 +329,7 @@ class AsyncGuidedEnv(AsyncEnv):
                 'obs': obs,
                 'reward': reward,
                 'moved': list(self._moved),
-                'center_prints_seen': list(self._center_prints_seen),
+                #'center_prints_seen': list(self._center_prints_seen),
                 'finished': self._client.level_finished}
 
         self._old_pos = pos
@@ -311,7 +340,6 @@ class AsyncGuidedEnv(AsyncEnv):
 
     async def _get_initial_observation(self):
         obs, reward, done, info = await self._get_step_return_and_update()
-        self._reset_per_episode_state()
         return obs
 
 
