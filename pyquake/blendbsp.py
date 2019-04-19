@@ -5,7 +5,7 @@ import bpy
 import bmesh
 import numpy as np
 
-from .bsp import Bsp, get_tex_coords
+from .bsp import Bsp
 from . import pak
 
 
@@ -31,7 +31,7 @@ _EMISSION_COLORS= {
 
 
 _ALL_FULLBRIGHT_IN_OVERLAY = True
-_FULLBRIGHT_OBJECT_OVERLAY = False
+_FULLBRIGHT_OBJECT_OVERLAY = True
 
 _USE_LUXCORE = False
 
@@ -232,7 +232,7 @@ def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
 
 
 def _set_uvs(mesh, textures, texinfos, vertices, faces):
-    mesh.uv_textures.new()
+    mesh.uv_layers.new()
 
     bm = bmesh.new()
     bm.from_mesh(mesh)
@@ -245,13 +245,13 @@ def _set_uvs(mesh, textures, texinfos, vertices, faces):
         assert len(face) == len(bm_face.loops)
         for bm_loop, vert_idx in zip(bm_face.loops, face):
             vert = vertices[vert_idx]
-            s, t = get_tex_coords(texinfo, vert)
+            s, t = texinfo.vert_to_tex_coords(vert)
             bm_loop[uv_layer].uv = s / texture.width, t / texture.height
 
     bm.to_mesh(mesh)
 
 
-def _apply_materials(bsp, mesh, face_indices, mat_suffix):
+def _apply_materials(bsp, mesh, bsp_faces, mat_suffix):
     tex_id_to_mat_idx = {}
     mat_idx = 0
     for texture_id, texture in enumerate(bsp.textures):
@@ -261,23 +261,21 @@ def _apply_materials(bsp, mesh, face_indices, mat_suffix):
             tex_id_to_mat_idx[texture_id] = mat_idx
             mat_idx += 1
 
-    for mesh_poly, bsp_face_idx in zip(mesh.polygons, face_indices):
-        bsp_face = bsp.faces[bsp_face_idx]
+    for mesh_poly, bsp_face in zip(mesh.polygons, bsp_faces):
         mesh_poly.material_index = tex_id_to_mat_idx[bsp.texinfo[bsp_face.texinfo_id].texture_id]
 
 
-def _get_visible_face_indices(bsp):
+def _get_visible_faces(bsp):
     # Exclude faces from all but the first model (hides doors, buttons, etc).
-    model_faces = {i for m in bsp.models[1:]
-                     for i in range(m.first_face_idx, m.first_face_idx + m.num_faces)}
+    model_faces = {f for m in bsp.models[1:] for f in m.faces}
     model_faces = {}
 
     # Don't render the sky (we just use the world surface shader / sun light for that)
     banned_tex_ids = {i for i, t in enumerate(bsp.textures)
                         if t.name.startswith('sky') or t.name == 'trigger'}
-    return [face_idx for face_idx, face in enumerate(bsp.faces)
-                        if bsp.texinfo[face.texinfo_id].texture_id not in banned_tex_ids
-                        if face_idx not in model_faces]
+    return [face for face in bsp.faces
+                        if face.tex_info.texture_id not in banned_tex_ids
+                        if face not in model_faces]
 
 
 def _get_bbox(a):
@@ -361,10 +359,10 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
 
     # For each fullbright face in the original BSP, create a set of new faces, one for each wrap of the texture image.
     # The new faces bounds the fullbright texels for that particular wrap of the texture
-    new_faces, new_face_indices = [], []
+    new_faces, new_bsp_faces = [], []
     vertices = bsp.vertices
-    for face_idx in _get_visible_face_indices(bsp):
-        texinfo = bsp.texinfo[bsp.faces[face_idx].texinfo_id]
+    for face in _get_visible_faces(bsp):
+        texinfo = face.tex_info
         texture_id = texinfo.texture_id
         texture = bsp.textures[texture_id]
         bbox_id = bbox_ids[texture_id]
@@ -374,9 +372,8 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
         bbox = bboxes[bbox_id]
 
         tex_size = np.array([texture.width, texture.height])
-        vert_indices = list(bsp.iter_face_vert_indices(face_idx))
-        tex_coords = np.array(list(bsp.iter_face_tex_coords(face_idx)))
-
+        vert_indices = list(face.vert_indices)
+        tex_coords = np.array(list(face.tex_coords))
         face_bbox = np.stack([np.min(tex_coords, axis=0), np.max(tex_coords, axis=0)])
         
         # Iterate over each potential wraps of the texture.  Number of wraps is determined using bounding boxes in
@@ -395,7 +392,7 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
                 new_vert_indices, vertices = _offset_face(new_vert_indices, vertices, -0.01)
                 if new_vert_indices:
                     new_faces.append(new_vert_indices)
-                    new_face_indices.append(face_idx)
+                    new_bsp_faces.append(face)
 
 
     # Actually make the mash and add it to the scene
@@ -403,37 +400,35 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
     mesh.from_pydata(vertices, [], new_faces)
 
     obj = bpy.data.objects.new('{}_fullbright'.format(map_name), mesh)
-    bpy.context.scene.objects.link(obj)
+    bpy.context.scene.collection.objects.link(obj)
 
     if do_materials:
-        texinfos = [bsp.texinfo[bsp.faces[face_idx].texinfo_id] for face_idx in new_face_indices]
-        textures = [bsp.textures[texinfo.texture_id] for texinfo in texinfos]
+        texinfos = [face.tex_info for face in new_bsp_faces]
+        textures = [texinfo.texture for texinfo in texinfos]
         _set_uvs(mesh, textures, texinfos, vertices, new_faces)
-        _apply_materials(bsp, mesh, new_face_indices, 'fullbright')
+        _apply_materials(bsp, mesh, new_bsp_faces, 'fullbright')
 
 
 def _load_object(bsp, map_name, do_materials):
-    face_indices = _get_visible_face_indices(bsp)
-    faces = [list(bsp.iter_face_vert_indices(face_idx)) for face_idx in face_indices]
+    bsp_faces = _get_visible_faces(bsp)
+    faces = [list(bsp_face.vert_indices) for bsp_face in bsp_faces]
 
     mesh = bpy.data.meshes.new(map_name)
     mesh.from_pydata(bsp.vertices, [], faces)
 
     if do_materials:
-        texinfos = [bsp.texinfo[bsp.faces[face_idx].texinfo_id] for face_idx in face_indices]
-        textures = [bsp.textures[texinfo.texture_id] for texinfo in texinfos]
+        texinfos = [bsp_face.tex_info for bsp_face in bsp_faces]
+        textures = [texinfo.texture for texinfo in texinfos]
         _set_uvs(mesh, textures, texinfos, bsp.vertices, faces)
-        _apply_materials(bsp, mesh, face_indices, 'main')
+        _apply_materials(bsp, mesh, bsp_faces, 'main')
 
     mesh.validate()
 
     obj = bpy.data.objects.new(map_name, mesh)
-    bpy.context.scene.objects.link(obj)
+    bpy.context.scene.collection.objects.link(obj)
 
 
 def load_bsp(pak_root, map_name, do_materials=True):
-    print("hello")
-
     fs = pak.Filesystem(pak_root)
     fname = 'maps/{}.bsp'.format(map_name)
     bsp = Bsp(io.BytesIO(fs[fname]))

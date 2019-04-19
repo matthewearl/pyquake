@@ -148,7 +148,7 @@ class Face(NamedTuple):
 
     @property
     def tex_coords(self):
-        return [get_tex_coords(self.tex_info, v) for v in self.vertices]
+        return [self.tex_info.vert_to_tex_coords(v) for v in self.vertices]
 
     @property
     def tex_info(self):
