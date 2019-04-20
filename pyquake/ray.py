@@ -279,7 +279,7 @@ def raytracer_main2():
         ray_dir = rot @ K_inv @ np.array([x, y, 1])
         return ray_dir / np.linalg.norm(ray_dir)
 
-    origin_leaf = _get_leaf_from_point(bsp.models[0], ray_origin)
+    origin_leaf = bsp.models[0].get_leaf(ray_origin)
     visible_leaves = list(origin_leaf.visible_leaves)
     vis_faces = list({f for l in origin_leaf.visible_leaves for f in l.faces})
     print("Num visible leaves %s %s, num vis faces", len(visible_leaves), len(set(visible_leaves)), len(vis_faces))

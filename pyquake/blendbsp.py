@@ -1,22 +1,23 @@
 import io
 import logging
+from typing import NamedTuple, Optional, Any, Dict
 
 import bpy
 import bmesh
 import numpy as np
 
-from .bsp import Bsp
+from .bsp import Bsp, Face
 from . import pak
 
 
 _EXTRA_BRIGHT_TEXTURES = {
-    'tlight02': 30,
-    'tlight07': 1000,
-    'tlight11': 100,
-    'tlight01': 100,
-    'sliplite': 100,
-    'slipside': 100,
-    '*slime0': 100,
+    'tlight02': (30, True),
+    'tlight07': (1000, True),
+    'tlight11': (100, True),
+    'tlight01': (10_000, True),
+    'sliplite': (100, True),
+    'slipside': (100, True),
+    '*slime0': (100, False),
 }
 
 
@@ -208,7 +209,7 @@ def _load_material(texture_id, texture, ims, fullbright_ims):
 
     mat, nodes, links = _blender_new_mat('{}_main'.format(texture.name))
 
-    strength = _EXTRA_BRIGHT_TEXTURES.get(texture.name, 1)
+    strength, sample_as_light = _EXTRA_BRIGHT_TEXTURES.get(texture.name, (1, False))
 
     if _USE_LUXCORE:
         emission_color = _EMISSION_COLORS.get(texture.name)
@@ -218,6 +219,7 @@ def _load_material(texture_id, texture, ims, fullbright_ims):
             _setup_diffuse_material(nodes, links, im)
         else:
             _setup_fullbright_material(nodes, links, im, fullbright_im, strength)
+            mat.cycles.sample_as_light = sample_as_light
     else:
         _setup_diffuse_material(nodes, links, im)
 
@@ -227,7 +229,9 @@ def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
     fullbright_im = fullbright_ims[texture_id]
     if fullbright_im is not None:
         mat, nodes, links = _blender_new_mat('{}_fullbright'.format(texture.name))
-        _setup_transparent_fullbright(nodes, links, im, fullbright_im, _EXTRA_BRIGHT_TEXTURES.get(texture.name, 1))
+        strength, sample_as_light =_EXTRA_BRIGHT_TEXTURES.get(texture.name, (1, False))
+        _setup_transparent_fullbright(nodes, links, im, fullbright_im, strength)
+        mat.cycles.sample_as_light = sample_as_light
 
 
 def _set_uvs(mesh, textures, texinfos, faces):
@@ -273,8 +277,8 @@ def _get_visible_faces(bsp):
     banned_tex_ids = {i for i, t in enumerate(bsp.textures)
                         if t.name.startswith('sky') or t.name == 'trigger'}
     return [face for face in bsp.faces
-                        if face.tex_info.texture_id not in banned_tex_ids
-                        if face not in model_faces]
+                 if face.tex_info.texture_id not in banned_tex_ids
+                 if face not in model_faces]
 
 
 def _get_bbox(a):
@@ -357,7 +361,7 @@ def _pydata_from_faces(tuple_faces):
     return verts, [], int_faces
 
 
-def _load_fullbright_object(bsp, map_name, pal, do_materials):
+def _load_fullbright_objects(bsp, map_name, pal, do_materials):
     # Calculate bounding boxes for regions of full brightness.
     bbox_ids, bboxes = [], []
     for texture in bsp.textures:
@@ -367,6 +371,8 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
             bboxes.append(_get_bbox(fullbright_array_im))
         else:
             bbox_ids.append(None)
+
+    fullbright_objects = {}
 
     # For each fullbright face in the original BSP, create a set of new faces, one for each wrap of the texture image.
     # The new faces bounds the fullbright texels for that particular wrap of the texture
@@ -413,11 +419,15 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
         obj = bpy.data.objects.new(f'{map_name}_fullbright_{i}', mesh)
         bpy.context.scene.collection.objects.link(obj)
 
+        fullbright_objects[face] = obj
+
         if do_materials:
             texinfos = [face.tex_info for face in new_bsp_faces]
             textures = [texinfo.texture for texinfo in texinfos]
             _set_uvs(mesh, textures, texinfos, new_faces)
             _apply_materials(bsp, mesh, new_bsp_faces, 'fullbright')
+
+    return fullbright_objects
 
 
 def _load_object(bsp, map_name, do_materials):
@@ -437,6 +447,19 @@ def _load_object(bsp, map_name, do_materials):
 
     obj = bpy.data.objects.new(map_name, mesh)
     bpy.context.scene.collection.objects.link(obj)
+
+
+class BlendBsp(NamedTuple):
+    bsp: Bsp
+    fullbright_objects: Optional[Dict[Face, Any]]
+
+    def hide_invisible_fullbright_objects(self, pos):
+        leaf = self.bsp.models[0].get_leaf(pos)
+        visible_leaves = {next_leaf for leaf in leaf.visible_leaves for next_leaf in leaf.visible_leaves}
+        visible_faces = {f for l in visible_leaves for f in l.faces}
+
+        for face, obj in self.fullbright_objects.items():
+            obj.hide_render = face not in visible_faces
 
 
 def load_bsp(pak_root, map_name, do_materials=True):
@@ -460,6 +483,8 @@ def load_bsp(pak_root, map_name, do_materials=True):
             for texture_id, texture in enumerate(bsp.textures):
                 _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
 
-        _load_fullbright_object(bsp, map_name, pal, do_materials)
+        fullbright_objects = _load_fullbright_objects(bsp, map_name, pal, do_materials)
+    else:
+        fullbright_objects = {}
 
-    return bsp
+    return BlendBsp(bsp, fullbright_objects)

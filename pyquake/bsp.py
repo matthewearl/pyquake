@@ -100,7 +100,6 @@ class Leaf(NamedTuple):
         return (self.bsp.faces[self.bsp.face_list[i]]
                 for i in range(self.face_list_idx, self.face_list_idx + self.num_faces))
 
-
     @property
     @functools.lru_cache(None)
     @_listify
@@ -108,7 +107,7 @@ class Leaf(NamedTuple):
         i = self.vis_offset
         visdata = self.bsp.visdata
         leaf_idx = 1
-        while leaf_idx < len(self.bsp.leaves):
+        while leaf_idx < self.bsp.models[0].num_leaves:
             if visdata[i] == 0:
                 leaf_idx += 8 * visdata[i + 1]
                 i += 2
@@ -200,8 +199,6 @@ class Face(NamedTuple):
         return np.array(list(self.vertices)).mean(axis=0)
 
 
-
-
 class TexInfo(NamedTuple):
     bsp: "Bsp"
     vec_s: float
@@ -226,11 +223,15 @@ class TexInfo(NamedTuple):
         return np.array(self.vec_s) * (tc[0] - self.dist_s) + np.array(self.vec_t) * (tc[1] - self.dist_t)
 
 
+def _infront(point, plane_norm, plane_dist):
+    return np.dot(point, plane_norm) - plane_dist >= 0
+
 
 class Model(NamedTuple):
     bsp: "Bsp"
     first_face_idx: int
     num_faces: int
+    num_leaves: int
     node_id: int
 
     @property
@@ -240,6 +241,16 @@ class Model(NamedTuple):
     @property
     def node(self):
         return self.bsp.nodes[self.node_id]
+
+    def get_leaf(self, point):
+        point = np.array(point)
+        node = self.node
+        while True:
+            child_num = 0 if _infront(point, node.plane.normal, node.plane.dist) else 1
+            child = node.get_child(child_num) 
+            if node.child_is_leaf(child_num):
+                return child
+            node = child
 
 
 class Texture(NamedTuple):
@@ -345,7 +356,7 @@ class Bsp:
         logging.debug("Reading models")
         def read_model(mins1, mins2, mins3, maxs1, maxs2, maxs3, o1, o2, o3, n1, n2, n3, n4, num_leaves, first_face_idx,
                        num_faces):
-            return Model(self, first_face_idx, num_faces, n1)
+            return Model(self, first_face_idx, num_faces, num_leaves, n1)
         self.models = self._read_lump(f, self._read_dir_entry(f, 14), "<ffffffffflllllll", read_model)
 
         logging.debug("Reading textures")
