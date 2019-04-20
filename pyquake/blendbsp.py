@@ -9,13 +9,15 @@ from .bsp import Bsp
 from . import pak
 
 
-_EXTRA_BRIGHT_TEXTURES = [
-    'tlight02',
-    'tlight07',
-    'tlight11',
-    'tlight01',
-    '*slime0',
-]
+_EXTRA_BRIGHT_TEXTURES = {
+    'tlight02': 30,
+    'tlight07': 1000,
+    'tlight11': 100,
+    'tlight01': 100,
+    'sliplite': 100,
+    'slipside': 100,
+    '*slime0': 100,
+}
 
 
 _LIGHT_TINT = {
@@ -60,7 +62,7 @@ def _setup_diffuse_material(nodes, links, im):
     links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
 
 
-def _setup_transparent_fullbright(nodes, links, im, glow_im, extra_bright=False):
+def _setup_transparent_fullbright(nodes, links, im, glow_im, strength):
     texture_node = nodes.new('ShaderNodeTexImage')
     emission_node = nodes.new('ShaderNodeEmission')
     output_node = nodes.new('ShaderNodeOutputMaterial')
@@ -73,8 +75,7 @@ def _setup_transparent_fullbright(nodes, links, im, glow_im, extra_bright=False)
     glow_texture_node.image = glow_im
     glow_texture_node.interpolation = 'Closest'
 
-    if extra_bright:
-        emission_node.inputs['Strength'].default_value = 100.
+    emission_node.inputs['Strength'].default_value = strength
 
     links.new(emission_node.inputs['Color'], texture_node.outputs['Color'])
     links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
@@ -103,7 +104,7 @@ def _setup_transparent_diffuse(nodes, links, im, glow_im):
     links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
 
 
-def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
+def _setup_fullbright_material(nodes, links, im, glow_im, strength):
     texture_node = nodes.new('ShaderNodeTexImage')
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
@@ -116,8 +117,7 @@ def _setup_fullbright_material(nodes, links, im, glow_im, extra_bright=False):
     glow_texture_node.image = glow_im
     glow_texture_node.interpolation = 'Closest'
 
-    if extra_bright:
-        emission_node.inputs['Strength'].default_value = 100.
+    emission_node.inputs['Strength'].default_value = strength
 
     links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
     links.new(emission_node.inputs['Color'], glow_texture_node.outputs['Color'])
@@ -154,7 +154,7 @@ def _blender_new_mat(name):
     return mat, nodes, links
 
 
-def _setup_luxcore_material(nodes, links, im, glow_im, extra_bright=False, emission_color=None):
+def _setup_luxcore_material(nodes, links, im, glow_im, strength, emission_color=None):
     matte_node = nodes.new('LuxCoreNodeMatGlossy2')
     output_node = nodes.new('LuxCoreNodeMatOutput')
     #diffuse_node = nodes.new('LuxCoreNodeTexImagemap')
@@ -162,8 +162,7 @@ def _setup_luxcore_material(nodes, links, im, glow_im, extra_bright=False, emiss
 
     if glow_im is not None or emission_color is not None:
         emission_node = nodes.new('LuxCoreNodeMatEmission')
-        if extra_bright:
-            emission_node.gain = 100
+        emission_node.gain = strength
 
     if glow_im is not None:
         glow_node = nodes.new('LuxCoreNodeTexImagemap')
@@ -209,16 +208,16 @@ def _load_material(texture_id, texture, ims, fullbright_ims):
 
     mat, nodes, links = _blender_new_mat('{}_main'.format(texture.name))
 
-    extra_bright = texture.name in _EXTRA_BRIGHT_TEXTURES
+    strength = _EXTRA_BRIGHT_TEXTURES.get(texture.name, 1)
 
     if _USE_LUXCORE:
         emission_color = _EMISSION_COLORS.get(texture.name)
-        _setup_luxcore_material(nodes, links, im, fullbright_im, extra_bright, emission_color)
+        _setup_luxcore_material(nodes, links, im, fullbright_im, strength, emission_color)
     elif fullbright_im is not None:
-        if _FULLBRIGHT_OBJECT_OVERLAY and (_ALL_FULLBRIGHT_IN_OVERLAY or extra_bright):
+        if _FULLBRIGHT_OBJECT_OVERLAY and (_ALL_FULLBRIGHT_IN_OVERLAY or strength > 1):
             _setup_diffuse_material(nodes, links, im)
         else:
-            _setup_fullbright_material(nodes, links, im, fullbright_im, extra_bright)
+            _setup_fullbright_material(nodes, links, im, fullbright_im, strength)
     else:
         _setup_diffuse_material(nodes, links, im)
 
@@ -228,10 +227,10 @@ def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
     fullbright_im = fullbright_ims[texture_id]
     if fullbright_im is not None:
         mat, nodes, links = _blender_new_mat('{}_fullbright'.format(texture.name))
-        _setup_transparent_fullbright(nodes, links, im, fullbright_im, texture.name in _EXTRA_BRIGHT_TEXTURES)
+        _setup_transparent_fullbright(nodes, links, im, fullbright_im, _EXTRA_BRIGHT_TEXTURES.get(texture.name, 1))
 
 
-def _set_uvs(mesh, textures, texinfos, vertices, faces):
+def _set_uvs(mesh, textures, texinfos, faces):
     mesh.uv_layers.new()
 
     bm = bmesh.new()
@@ -243,8 +242,7 @@ def _set_uvs(mesh, textures, texinfos, vertices, faces):
     assert len(bm.faces) == len(textures)
     for bm_face, face, texinfo, texture in zip(bm.faces, faces, texinfos, textures):
         assert len(face) == len(bm_face.loops)
-        for bm_loop, vert_idx in zip(bm_face.loops, face):
-            vert = vertices[vert_idx]
+        for bm_loop, vert in zip(bm_face.loops, face):
             s, t = texinfo.vert_to_tex_coords(vert)
             bm_loop[uv_layer].uv = s / texture.width, t / texture.height
 
@@ -254,9 +252,10 @@ def _set_uvs(mesh, textures, texinfos, vertices, faces):
 def _apply_materials(bsp, mesh, bsp_faces, mat_suffix):
     tex_id_to_mat_idx = {}
     mat_idx = 0
+    face_texture_ids = {bsp_face.tex_info.texture_id for bsp_face in bsp_faces}
     for texture_id, texture in enumerate(bsp.textures):
         mat_name = '{}_{}'.format(texture.name, mat_suffix)
-        if mat_name in bpy.data.materials:
+        if mat_name in bpy.data.materials and texture_id in face_texture_ids:
             mesh.materials.append(bpy.data.materials[mat_name])
             tex_id_to_mat_idx[texture_id] = mat_idx
             mat_idx += 1
@@ -286,14 +285,12 @@ def _get_bbox(a):
     return np.array(out).T
 
 
-def _get_face_normal(vert_indices, vertices):
+def _get_face_normal(vertices):
     first_edge = None
     best_normal = None
 
-    prev_vert = vertices[vert_indices[-1]]
-    for vert_index in vert_indices:
-        vert = vertices[vert_index]
-
+    prev_vert = vertices[-1]
+    for vert in vertices:
         edge = np.array(vert) - np.array(prev_vert)
         edge /= np.linalg.norm(edge)
         if first_edge is None:
@@ -307,43 +304,57 @@ def _get_face_normal(vert_indices, vertices):
     return normal / np.linalg.norm(normal)
 
 
-def _offset_face(vert_indices, vertices, distance):
-    new_vertices, new_vert_indices = [], []
-    normal = _get_face_normal(vert_indices, vertices)
+def _offset_face(vertices, distance):
+    new_vertices = []
+    normal = _get_face_normal(vertices)
 
-    for vert_index in vert_indices:
-        vert = vertices[vert_index]
+    for vert in vertices:
+        new_vertices.append(tuple(vert + distance * normal))
 
-        new_vert = vert + distance * normal
-        new_vert_indices.append(len(vertices) + len(new_vertices))
-        new_vertices.append(new_vert)
-
-    return new_vert_indices, vertices + new_vertices
+    return new_vertices
 
 
-def _truncate_face(vert_indices, vertices, normal, plane_dist):
-    if len(vert_indices) == 0:
-        return [], vertices
+def _truncate_face(vertices, normal, plane_dist):
+    if len(vertices) == 0:
+        return vertices
 
-    new_vertices, new_vert_indices = [], []
-    prev_vert = vertices[vert_indices[-1]]
-    for vert_index in vert_indices:
-        vert = vertices[vert_index]
+    new_vertices = []
+    prev_vert = vertices[-1]
+    for vert in vertices:
         dist = np.dot(vert, normal) - plane_dist
         prev_dist = np.dot(prev_vert, normal) - plane_dist
 
         if (prev_dist >= 0) != (dist >= 0):
             alpha = -dist / (prev_dist - dist)
             new_vert = tuple(alpha * np.array(prev_vert) + (1 - alpha) * np.array(vert))
-            new_vert_indices.append(len(vertices) + len(new_vertices))
             new_vertices.append(new_vert)
 
         if dist >= 0:
-            new_vert_indices.append(vert_index)
+            new_vertices.append(vert)
 
         prev_vert = vert
 
-    return new_vert_indices, vertices + new_vertices
+    return new_vertices
+
+
+def _pydata_from_faces(tuple_faces):
+    d = {}
+    int_faces = []
+    for tuple_face in tuple_faces:
+        int_face = []
+        for vert in tuple_face:
+            if id(vert) not in d:
+                d[id(vert)] = (len(d), vert)
+            int_face.append(d[id(vert)][0])
+        int_faces.append(int_face)
+
+    verts = [None] * len(d)
+    for i, vert in d.values():
+        verts[i] = vert
+    assert None not in verts
+
+    print(verts, int_faces)
+    return verts, [], int_faces
 
 
 def _load_fullbright_object(bsp, map_name, pal, do_materials):
@@ -359,9 +370,10 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
 
     # For each fullbright face in the original BSP, create a set of new faces, one for each wrap of the texture image.
     # The new faces bounds the fullbright texels for that particular wrap of the texture
-    new_faces, new_bsp_faces = [], []
     vertices = bsp.vertices
-    for face in _get_visible_faces(bsp):
+    for i, face in enumerate(_get_visible_faces(bsp)):
+        new_faces, new_bsp_faces = [], []
+
         texinfo = face.tex_info
         texture_id = texinfo.texture_id
         texture = bsp.textures[texture_id]
@@ -372,7 +384,7 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
         bbox = bboxes[bbox_id]
 
         tex_size = np.array([texture.width, texture.height])
-        vert_indices = list(face.vert_indices)
+        face_verts = list(face.vertices)
         tex_coords = np.array(list(face.tex_coords))
         face_bbox = np.stack([np.min(tex_coords, axis=0), np.max(tex_coords, axis=0)])
         
@@ -382,31 +394,30 @@ def _load_fullbright_object(bsp, map_name, pal, do_materials):
         end_indices = np.ceil((face_bbox[1] - bbox[0]) / tex_size).astype(np.int)
         for t_offset in range(start_indices[1], end_indices[1]):
             for s_offset in range(start_indices[0], end_indices[0]):
-                new_vert_indices = vert_indices
+                new_face = face_verts
                 planes = [(np.array(texinfo.vec_s), s_offset * tex_size[0] + bbox[0, 0] - texinfo.dist_s),
                           (-np.array(texinfo.vec_s), -(s_offset * tex_size[0] + bbox[1, 0] - texinfo.dist_s)),
                           (np.array(texinfo.vec_t), t_offset * tex_size[1] + bbox[0, 1] - texinfo.dist_t),
                           (-np.array(texinfo.vec_t), -(t_offset * tex_size[1] + bbox[1, 1] - texinfo.dist_t))]
                 for n, d in planes:
-                    new_vert_indices, vertices = _truncate_face(new_vert_indices, vertices, n, d)
-                new_vert_indices, vertices = _offset_face(new_vert_indices, vertices, -0.01)
-                if new_vert_indices:
-                    new_faces.append(new_vert_indices)
+                    new_face = _truncate_face(new_face, n, d)
+                new_face = _offset_face(new_face, -0.01)
+                if new_face:
+                    new_faces.append(new_face)
                     new_bsp_faces.append(face)
 
+        # Actually make the mesh and add it to the scene
+        mesh = bpy.data.meshes.new(map_name)
+        mesh.from_pydata(*_pydata_from_faces(new_faces))
 
-    # Actually make the mash and add it to the scene
-    mesh = bpy.data.meshes.new(map_name)
-    mesh.from_pydata(vertices, [], new_faces)
+        obj = bpy.data.objects.new(f'{map_name}_fullbright_{i}', mesh)
+        bpy.context.scene.collection.objects.link(obj)
 
-    obj = bpy.data.objects.new('{}_fullbright'.format(map_name), mesh)
-    bpy.context.scene.collection.objects.link(obj)
-
-    if do_materials:
-        texinfos = [face.tex_info for face in new_bsp_faces]
-        textures = [texinfo.texture for texinfo in texinfos]
-        _set_uvs(mesh, textures, texinfos, vertices, new_faces)
-        _apply_materials(bsp, mesh, new_bsp_faces, 'fullbright')
+        if do_materials:
+            texinfos = [face.tex_info for face in new_bsp_faces]
+            textures = [texinfo.texture for texinfo in texinfos]
+            _set_uvs(mesh, textures, texinfos, new_faces)
+            _apply_materials(bsp, mesh, new_bsp_faces, 'fullbright')
 
 
 def _load_object(bsp, map_name, do_materials):
@@ -419,7 +430,7 @@ def _load_object(bsp, map_name, do_materials):
     if do_materials:
         texinfos = [bsp_face.tex_info for bsp_face in bsp_faces]
         textures = [texinfo.texture for texinfo in texinfos]
-        _set_uvs(mesh, textures, texinfos, bsp.vertices, faces)
+        _set_uvs(mesh, textures, texinfos, [list(bsp_face.vertices) for bsp_face in bsp_faces])
         _apply_materials(bsp, mesh, bsp_faces, 'main')
 
     mesh.validate()
