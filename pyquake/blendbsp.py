@@ -235,7 +235,7 @@ def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
         mat.cycles.sample_as_light = sample_as_light
 
 
-def _set_uvs(mesh, textures, texinfos, faces):
+def _set_uvs(mesh, texinfos, faces):
     mesh.uv_layers.new()
 
     bm = bmesh.new()
@@ -244,42 +244,34 @@ def _set_uvs(mesh, textures, texinfos, faces):
 
     assert len(bm.faces) == len(faces)
     assert len(bm.faces) == len(texinfos)
-    assert len(bm.faces) == len(textures)
-    for bm_face, face, texinfo, texture in zip(bm.faces, faces, texinfos, textures):
+    for bm_face, face, texinfo in zip(bm.faces, faces, texinfos):
         assert len(face) == len(bm_face.loops)
         for bm_loop, vert in zip(bm_face.loops, face):
             s, t = texinfo.vert_to_tex_coords(vert)
-            bm_loop[uv_layer].uv = s / texture.width, t / texture.height
+            bm_loop[uv_layer].uv = s / texinfo.texture.width, t / texinfo.texture.height
 
     bm.to_mesh(mesh)
 
 
-def _apply_materials(bsp, mesh, bsp_faces, mat_suffix):
-    tex_id_to_mat_idx = {}
+def _apply_materials(model, mesh, bsp_faces, mat_suffix):
+    tex_to_mat_idx = {}
     mat_idx = 0
-    face_texture_ids = {bsp_face.tex_info.texture_id for bsp_face in bsp_faces}
-    for texture_id, texture in enumerate(bsp.textures):
+    for texture in {f.tex_info.texture for f in model.faces}:
         mat_name = '{}_{}'.format(texture.name, mat_suffix)
-        if mat_name in bpy.data.materials and texture_id in face_texture_ids:
+        if mat_name in bpy.data.materials:
             mesh.materials.append(bpy.data.materials[mat_name])
-            tex_id_to_mat_idx[texture_id] = mat_idx
+            tex_to_mat_idx[texture] = mat_idx
             mat_idx += 1
 
     for mesh_poly, bsp_face in zip(mesh.polygons, bsp_faces):
-        mesh_poly.material_index = tex_id_to_mat_idx[bsp.texinfo[bsp_face.texinfo_id].texture_id]
+        mesh_poly.material_index = tex_to_mat_idx[bsp_face.tex_info.texture]
 
 
-def _get_visible_faces(bsp):
-    # Exclude faces from all but the first model (hides doors, buttons, etc).
-    model_faces = {f for m in bsp.models[1:] for f in m.faces}
-    model_faces = {}
-
-    # Don't render the sky (we just use the world surface shader / sun light for that)
-    banned_tex_ids = {i for i, t in enumerate(bsp.textures)
-                        if t.name.startswith('sky') or t.name == 'trigger'}
-    return [face for face in bsp.faces
-                 if face.tex_info.texture_id not in banned_tex_ids
-                 if face not in model_faces]
+def _get_visible_faces(model):
+    return [(face_id, face)
+            for face_id, face in zip(range(model.first_face_idx, model.first_face_idx + model.num_faces), model.faces)
+            if face.tex_info.texture.name != 'trigger'
+            if not face.tex_info.texture.name.startswith('sky')]
 
 
 def _get_bbox(a):
@@ -358,38 +350,29 @@ def _pydata_from_faces(tuple_faces):
         verts[i] = vert
     assert None not in verts
 
-    print(verts, int_faces)
     return verts, [], int_faces
 
 
-def _load_fullbright_objects(bsp, map_name, pal, do_materials):
+def _load_fullbright_objects(model, map_name, pal, do_materials):
     # Calculate bounding boxes for regions of full brightness.
-    bbox_ids, bboxes = [], []
-    for texture in bsp.textures:
+    bboxes = {}
+    for texture in {f.tex_info.texture for f in model.faces}:
         _, fullbright_array_im = _texture_to_array(pal, texture)
-
         if fullbright_array_im is not None:
-            bbox_ids.append(len(bboxes))
-            bboxes.append(_get_bbox(fullbright_array_im))
-        else:
-            bbox_ids.append(None)
+            bboxes[texture] = _get_bbox(fullbright_array_im)
 
     fullbright_objects = {}
 
     # For each fullbright face in the original BSP, create a set of new faces, one for each wrap of the texture image.
     # The new faces bounds the fullbright texels for that particular wrap of the texture
-    vertices = bsp.vertices
-    for i, face in enumerate(_get_visible_faces(bsp)):
+    for face_id, face in _get_visible_faces(model):
         new_faces, new_bsp_faces = [], []
 
         texinfo = face.tex_info
-        texture_id = texinfo.texture_id
-        texture = bsp.textures[texture_id]
-        bbox_id = bbox_ids[texture_id]
-        if bbox_id is None or (not _ALL_FULLBRIGHT_IN_OVERLAY and texture.name not in _EXTRA_BRIGHT_TEXTURES):
+        texture = texinfo.texture
+        bbox = bboxes.get(texture)
+        if bbox is None or (not _ALL_FULLBRIGHT_IN_OVERLAY and texture.name not in _EXTRA_BRIGHT_TEXTURES):
             continue
-
-        bbox = bboxes[bbox_id]
 
         tex_size = np.array([texture.width, texture.height])
         face_verts = list(face.vertices)
@@ -419,37 +402,39 @@ def _load_fullbright_objects(bsp, map_name, pal, do_materials):
         mesh = bpy.data.meshes.new(map_name)
         mesh.from_pydata(*_pydata_from_faces(new_faces))
 
-        obj = bpy.data.objects.new(f'{map_name}_fullbright_{i}', mesh)
+        obj = bpy.data.objects.new(f'{map_name}_fullbright_{face_id}', mesh)
         bpy.context.scene.collection.objects.link(obj)
 
         fullbright_objects[face] = obj
 
         if do_materials:
             texinfos = [face.tex_info for face in new_bsp_faces]
-            textures = [texinfo.texture for texinfo in texinfos]
-            _set_uvs(mesh, textures, texinfos, new_faces)
-            _apply_materials(bsp, mesh, new_bsp_faces, 'fullbright')
+            _set_uvs(mesh, texinfos, new_faces)
+            _apply_materials(model, mesh, new_bsp_faces, 'fullbright')
 
     return fullbright_objects
 
 
-def _load_object(bsp, map_name, do_materials):
-    bsp_faces = _get_visible_faces(bsp)
-    faces = [list(bsp_face.vert_indices) for bsp_face in bsp_faces]
+def _load_object(model_id, model, map_name, do_materials):
+    bsp_faces = [face for _, face in _get_visible_faces(model)]
+    faces = [list(bsp_face.vertices) for bsp_face in bsp_faces]
 
-    mesh = bpy.data.meshes.new(map_name)
-    mesh.from_pydata(bsp.vertices, [], faces)
+    name = f"{map_name}_{model_id}"
+
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(*_pydata_from_faces(faces))
 
     if do_materials:
         texinfos = [bsp_face.tex_info for bsp_face in bsp_faces]
-        textures = [texinfo.texture for texinfo in texinfos]
-        _set_uvs(mesh, textures, texinfos, [list(bsp_face.vertices) for bsp_face in bsp_faces])
-        _apply_materials(bsp, mesh, bsp_faces, 'main')
+        _set_uvs(mesh, texinfos, faces)
+        _apply_materials(model, mesh, bsp_faces, 'main')
 
     mesh.validate()
 
-    obj = bpy.data.objects.new(map_name, mesh)
+    obj = bpy.data.objects.new(name, mesh)
     bpy.context.scene.collection.objects.link(obj)
+
+    return obj
 
 
 class BlendBsp(NamedTuple):
@@ -479,16 +464,27 @@ def load_bsp(pak_root, map_name, do_materials=True):
     if do_materials:
         for texture_id, texture in enumerate(bsp.textures):
             _load_material(texture_id, texture, ims, fullbright_ims)
+    
+    map_obj = bpy.data.objects.new(map_name, None)
+    bpy.context.scene.collection.objects.link(map_obj)
 
-    _load_object(bsp, map_name, do_materials)
+    fullbright_objects = {}
+    for model_id, model in enumerate(bsp.models):
+        model_obj = _load_object(model_id, model, map_name, do_materials)
+        model_obj.parent = map_obj
 
-    if _FULLBRIGHT_OBJECT_OVERLAY:
-        if do_materials:
-            for texture_id, texture in enumerate(bsp.textures):
-                _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
+        if _FULLBRIGHT_OBJECT_OVERLAY:
+            if do_materials:
+                for texture_id, texture in enumerate(bsp.textures):
+                    _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
 
-        fullbright_objects = _load_fullbright_objects(bsp, map_name, pal, do_materials)
-    else:
-        fullbright_objects = {}
+            model_fullbright_objects = _load_fullbright_objects(model, map_name, pal, do_materials)
+        else:
+            model_fullbright_objects = {}
+
+        for obj in model_fullbright_objects.values():
+            obj.parent = model_obj
+
+        fullbright_objects.update(model_fullbright_objects)
 
     return BlendBsp(bsp, fullbright_objects)

@@ -258,7 +258,10 @@ class Texture(NamedTuple):
     width: int
     height: int
     data: List[bytes]
-    
+
+    def __hash__(self):
+        return hash(id(self))
+
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
 
