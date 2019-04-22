@@ -13,11 +13,11 @@ from . import pak
 _EXTRA_BRIGHT_TEXTURES = {
     'tlight02': (30, True),
     'tlight07': (1000, True),
-    'tlight11': (100, True),
+    'tlight11': (1000, True),
     'tlight01': (10_000, True),
     'sliplite': (100, True),
     'slipside': (100, True),
-    '*slime0': (100, False),
+    '+0basebtn': (1000, True),
 }
 
 
@@ -130,7 +130,8 @@ def _setup_fullbright_material(nodes, links, im, glow_im, strength):
 def _blender_im_from_array(name, array_im):
     im = bpy.data.images.new(name, width=array_im.shape[1], height=array_im.shape[0])
     im.pixels = np.ravel(array_im)
-    #im.pack(as_png=True)
+    #im.use_fake_user = True
+    im.pack(as_png=True)
     return im
 
 
@@ -366,6 +367,7 @@ def _load_fullbright_objects(bsp, map_name, pal, do_materials):
     bbox_ids, bboxes = [], []
     for texture in bsp.textures:
         _, fullbright_array_im = _texture_to_array(pal, texture)
+
         if fullbright_array_im is not None:
             bbox_ids.append(len(bboxes))
             bboxes.append(_get_bbox(fullbright_array_im))
@@ -407,8 +409,9 @@ def _load_fullbright_objects(bsp, map_name, pal, do_materials):
                           (-np.array(texinfo.vec_t), -(t_offset * tex_size[1] + bbox[1, 1] - texinfo.dist_t))]
                 for n, d in planes:
                     new_face = _truncate_face(new_face, n, d)
-                new_face = _offset_face(new_face, -0.01)
+
                 if new_face:
+                    new_face = _offset_face(new_face, -0.01)
                     new_faces.append(new_face)
                     new_bsp_faces.append(face)
 
@@ -458,8 +461,9 @@ class BlendBsp(NamedTuple):
         visible_leaves = {next_leaf for leaf in leaf.visible_leaves for next_leaf in leaf.visible_leaves}
         visible_faces = {f for l in visible_leaves for f in l.faces}
 
-        for face, obj in self.fullbright_objects.items():
-            obj.hide_render = face not in visible_faces
+        for face in self.bsp.models[0].faces:
+            if face in self.fullbright_objects:
+                self.fullbright_objects[face].hide_render = face not in visible_faces
 
 
 def load_bsp(pak_root, map_name, do_materials=True):
