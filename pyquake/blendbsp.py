@@ -461,10 +461,13 @@ def load_bsp(pak_root, map_name, do_materials=True):
     if do_materials:
         ims, fullbright_ims = _load_images(pal, bsp)
 
-    if do_materials:
         for texture_id, texture in enumerate(bsp.textures):
             _load_material(texture_id, texture, ims, fullbright_ims)
     
+        if _FULLBRIGHT_OBJECT_OVERLAY:
+            for texture_id, texture in enumerate(bsp.textures):
+                _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
+
     map_obj = bpy.data.objects.new(map_name, None)
     bpy.context.scene.collection.objects.link(map_obj)
 
@@ -474,10 +477,6 @@ def load_bsp(pak_root, map_name, do_materials=True):
         model_obj.parent = map_obj
 
         if _FULLBRIGHT_OBJECT_OVERLAY:
-            if do_materials:
-                for texture_id, texture in enumerate(bsp.textures):
-                    _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
-
             model_fullbright_objects = _load_fullbright_objects(model, map_name, pal, do_materials)
         else:
             model_fullbright_objects = {}
