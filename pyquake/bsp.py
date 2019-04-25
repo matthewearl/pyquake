@@ -278,11 +278,9 @@ class Bsp:
             raise MalformedBspFile("File ended unexpectedly")
         return b
 
-    def _read_struct(self, f, struct_fmt, post_func=None):
+    def _read_struct(self, f, struct_fmt):
         size = struct.calcsize(struct_fmt)
         out = struct.unpack(struct_fmt, self._read(f, size))
-        if post_func is not None:
-            out = post_func(out)
         return out
 
     def _read_lump(self, f, dir_entry, struct_fmt, post_func=None):
