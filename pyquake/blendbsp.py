@@ -7,7 +7,7 @@ import bmesh
 import numpy as np
 
 from .bsp import Bsp, Face
-from . import pak
+from . import pak, blendmat
 
 
 _EXTRA_BRIGHT_TEXTURES = {
@@ -36,165 +36,21 @@ _EMISSION_COLORS= {
 _ALL_FULLBRIGHT_IN_OVERLAY = True
 _FULLBRIGHT_OBJECT_OVERLAY = True
 
-_USE_LUXCORE = False
 
-
-def _texture_to_array(pal, texture):
+def _texture_to_arrays(pal, texture, light_tint):
     im_indices = np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))
-    fullbright = (im_indices >= 224)
+    return blendmat.array_ims_from_indices(pal, texture, im_indices, light_tint=light_tint, gamma=0.8)
 
-    if not np.any(fullbright):
-        fullbright = None
-
-    array_im = pal[np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))]
-    array_im = array_im ** 0.8
-
-    return array_im, fullbright
-
-
-def _setup_diffuse_material(nodes, links, im):
-    texture_node = nodes.new('ShaderNodeTexImage')
-    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
-    output_node = nodes.new('ShaderNodeOutputMaterial')
-
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
-    links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
-
-
-def _setup_transparent_fullbright(nodes, links, im, glow_im, strength):
-    texture_node = nodes.new('ShaderNodeTexImage')
-    emission_node = nodes.new('ShaderNodeEmission')
-    output_node = nodes.new('ShaderNodeOutputMaterial')
-    glow_texture_node = nodes.new('ShaderNodeTexImage')
-    mix_node = nodes.new('ShaderNodeMixShader')
-    transparent_node = nodes.new('ShaderNodeBsdfTransparent')
-
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    glow_texture_node.image = glow_im
-    glow_texture_node.interpolation = 'Closest'
-
-    emission_node.inputs['Strength'].default_value = strength
-
-    links.new(emission_node.inputs['Color'], texture_node.outputs['Color'])
-    links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
-    links.new(mix_node.inputs[1], transparent_node.outputs['BSDF'])
-    links.new(mix_node.inputs[2], emission_node.outputs['Emission'])
-    links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
-
-
-def _setup_transparent_diffuse(nodes, links, im, glow_im):
-    texture_node = nodes.new('ShaderNodeTexImage')
-    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
-    output_node = nodes.new('ShaderNodeOutputMaterial')
-    glow_texture_node = nodes.new('ShaderNodeTexImage')
-    mix_node = nodes.new('ShaderNodeMixShader')
-    transparent_node = nodes.new('ShaderNodeBsdfTransparent')
-
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    glow_texture_node.image = glow_im
-    glow_texture_node.interpolation = 'Closest'
-
-    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
-    links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
-    links.new(mix_node.inputs[1], diffuse_node.outputs['BSDF'])
-    links.new(mix_node.inputs[2], transparent_node.outputs['BSDF'])
-    links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
-
-
-def _setup_fullbright_material(nodes, links, im, glow_im, strength):
-    texture_node = nodes.new('ShaderNodeTexImage')
-    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
-    output_node = nodes.new('ShaderNodeOutputMaterial')
-    add_node = nodes.new('ShaderNodeAddShader')
-    glow_texture_node = nodes.new('ShaderNodeTexImage')
-    emission_node = nodes.new('ShaderNodeEmission')
-
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    glow_texture_node.image = glow_im
-    glow_texture_node.interpolation = 'Closest'
-
-    emission_node.inputs['Strength'].default_value = strength
-
-    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
-    links.new(emission_node.inputs['Color'], glow_texture_node.outputs['Color'])
-    links.new(add_node.inputs[0], diffuse_node.outputs['BSDF'])
-    links.new(add_node.inputs[1], emission_node.outputs['Emission'])
-    links.new(output_node.inputs['Surface'], add_node.outputs['Shader'])
-
-
-def _blender_im_from_array(name, array_im):
-    im = bpy.data.images.new(name, width=array_im.shape[1], height=array_im.shape[0])
-    im.pixels = np.ravel(array_im)
-    #im.use_fake_user = True
-    im.pack(as_png=True)
-    return im
-
-
-def _blender_new_mat(name):
-    mat = bpy.data.materials.new(name)
-
-    if _USE_LUXCORE:
-        mat.luxcore.node_tree = bpy.data.node_groups.new(name=name, type="luxcore_material_nodes")
-        nodes = mat.luxcore.node_tree.nodes
-        links = mat.luxcore.node_tree.links
-    else:
-        mat.use_nodes = True
-
-        nodes = mat.node_tree.nodes
-        links = mat.node_tree.links
-
-        while nodes:
-            nodes.remove(nodes[0])
-        while links:
-            links.remove(links[0])
-
-    return mat, nodes, links
-
-
-def _setup_luxcore_material(nodes, links, im, glow_im, strength, emission_color=None):
-    matte_node = nodes.new('LuxCoreNodeMatGlossy2')
-    output_node = nodes.new('LuxCoreNodeMatOutput')
-    #diffuse_node = nodes.new('LuxCoreNodeTexImagemap')
-    matte_node.inputs['Roughness'].default_value = 0.3
-
-    if glow_im is not None or emission_color is not None:
-        emission_node = nodes.new('LuxCoreNodeMatEmission')
-        emission_node.gain = strength
-
-    if glow_im is not None:
-        glow_node = nodes.new('LuxCoreNodeTexImagemap')
-    elif emission_color is not None:
-        emission_node.inputs['Color'].default_value = emission_color
-
-    #diffuse_node.image = im
-    if glow_im is not None:
-        glow_node.image = glow_im
-
-    links.new(output_node.inputs['Material'], matte_node.outputs['Material'])
-    #links.new(matte_node.inputs['Diffuse Color'], diffuse_node.outputs['Color'])
-    if glow_im is not None or emission_color is not None:
-        links.new(matte_node.inputs['Emission'], emission_node.outputs['Emission'])
-    if glow_im is not None:
-        links.new(emission_node.inputs['Color'], glow_node.outputs['Color'])
-    
 
 def _load_images(pal, bsp):
     ims = []
     fullbright_ims = []
     for texture_id, texture in enumerate(bsp.textures):
-        array_im, fullbright = _texture_to_array(pal, texture)
-        im = _blender_im_from_array(texture.name, array_im)
-        if fullbright is not None:
-            glow_im = array_im * fullbright[..., None]
-            if texture.name in _LIGHT_TINT:
-                glow_im *= np.array(_LIGHT_TINT[texture.name])
-            glow_im = np.clip(glow_im, 0., 1.)
-            fullbright_im = _blender_im_from_array('{}_fullbright'.format(texture.name), glow_im)
+        array_im, fullbright_array_im = _texture_to_arrays(pal, texture, _LIGHT_TINT[texture.name])
+        im = blentmat.im_from_array(texture.name, array_im)
+
+        if fullbright_array_im is not None:
+            fullbright_im = blentmat.im_from_array(f"{texture.name}_fullbright", fullbright_array_im)
         else:
             fullbright_im = None
 
@@ -208,30 +64,27 @@ def _load_material(texture_id, texture, ims, fullbright_ims):
     im = ims[texture_id]
     fullbright_im = fullbright_ims[texture_id]
 
-    mat, nodes, links = _blender_new_mat('{}_main'.format(texture.name))
+    mat, nodes, links = blendmat.new_mat('{}_main'.format(texture.name))
 
     strength, sample_as_light = _EXTRA_BRIGHT_TEXTURES.get(texture.name, (1, False))
 
-    if _USE_LUXCORE:
-        emission_color = _EMISSION_COLORS.get(texture.name)
-        _setup_luxcore_material(nodes, links, im, fullbright_im, strength, emission_color)
-    elif fullbright_im is not None:
+    if fullbright_im is not None:
         if _FULLBRIGHT_OBJECT_OVERLAY and (_ALL_FULLBRIGHT_IN_OVERLAY or strength > 1):
-            _setup_diffuse_material(nodes, links, im)
+            blendmat.setup_diffuse_material(nodes, links, im)
         else:
-            _setup_fullbright_material(nodes, links, im, fullbright_im, strength)
+            blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, strength)
             mat.cycles.sample_as_light = sample_as_light
     else:
-        _setup_diffuse_material(nodes, links, im)
+        blendmat.setup_diffuse_material(nodes, links, im)
 
 
 def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
     im = ims[texture_id]
     fullbright_im = fullbright_ims[texture_id]
     if fullbright_im is not None:
-        mat, nodes, links = _blender_new_mat('{}_fullbright'.format(texture.name))
+        mat, nodes, links = blendmat.new_mat('{}_fullbright'.format(texture.name))
         strength, sample_as_light =_EXTRA_BRIGHT_TEXTURES.get(texture.name, (1, False))
-        _setup_transparent_fullbright(nodes, links, im, fullbright_im, strength)
+        blendmat.setup_transparent_fullbright_material(nodes, links, im, fullbright_im, strength)
         mat.cycles.sample_as_light = sample_as_light
 
 
@@ -357,7 +210,7 @@ def _load_fullbright_objects(model, map_name, pal, do_materials):
     # Calculate bounding boxes for regions of full brightness.
     bboxes = {}
     for texture in {f.tex_info.texture for f in model.faces}:
-        _, fullbright_array_im = _texture_to_array(pal, texture)
+        _, fullbright_array_im = _texture_to_arrays(pal, texture)
         if fullbright_array_im is not None:
             bboxes[texture] = _get_bbox(fullbright_array_im)
 

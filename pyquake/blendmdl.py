@@ -2,10 +2,12 @@ import io
 from dataclasses import dataclass
 from typing import Dict, Any
 
+import bmesh
 import bpy
 import bpy_types
+import numpy as np
 
-from . import pak, mdl
+from . import pak, mdl, blendmat
 
 
 def _create_block(obj, simple_frame):
@@ -45,17 +47,35 @@ class BlendMdl:
                 kfp.interpolation = 'LINEAR'
 
 
-def load_mdl(pak_root, mdl_name, fps=30):
+def _set_uvs(mesh, am):
+    mesh.uv_layers.new()
+
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    uv_layer = bm.loops.layers.uv[0]
+
+    for tri_idx, bm_face in enumerate(bm.faces):
+        tcs = am.get_tri_tcs(tri_idx)
+
+        for bm_loop, (s, t) in zip(bm_face.loops, tcs):
+            bm_loop[uv_layer].uv = s / am.header['skin_width'], t / am.header['skin_height']
+            
+    bm.to_mesh(mesh)
+
+
+def load_mdl(pak_root, mdl_name, obj_name, skin=0, fps=30):
+    # Load the alias model
     fs = pak.Filesystem(pak_root)
     fname = f'progs/{mdl_name}.mdl'
     am = mdl.AliasModel(io.BytesIO(fs[fname]))
 
-    mesh = bpy.data.meshes.new(mdl_name)
+    # Create the mesh and object
+    mesh = bpy.data.meshes.new(obj_name)
     mesh.from_pydata([list(v) for v in am.frames[0].frame.frame_verts], [], [list(t) for t in am.tris])
-
-    obj = bpy.data.objects.new(mdl_name, mesh)
+    obj = bpy.data.objects.new(obj_name, mesh)
     bpy.context.scene.collection.objects.link(obj)
 
+    # Create shape key blocks, used for animation.
     blocks = {}
     for frame in am.frames:
         if frame.frame_type != mdl.FrameType.SINGLE:
@@ -64,6 +84,26 @@ def load_mdl(pak_root, mdl_name, fps=30):
         if simple_frame.name in blocks:
             raise Exception("Duplicate frame name")
         blocks[simple_frame.name] = _create_block(obj, simple_frame)
+
+    # Set up material
+    mat_name = f"{mdl_name}_{skin}"
+    if mat_name not in bpy.data.materials:
+        pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+        pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
+
+        mat, nodes, links = blendmat.new_mat(mat_name)
+        array_im, fullbright_array_im = blendmat.array_ims_from_indices(mat_name, pal, am.skins[skin])
+        im = blendmat.im_from_array(mat_name, array_im)
+        if fullbright_array_im is not None:
+            fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
+            blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, 1.0)
+        else:
+            blendmat.setup_diffuse_material(nodes, links, im)
+    mat = bpy.data.materials[mat_name]
+
+    # Apply the material
+    mesh.materials.append(mat)
+    _set_uvs(mesh, am)
 
     return BlendMdl(am, blocks, obj)
 

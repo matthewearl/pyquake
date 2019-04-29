@@ -64,6 +64,13 @@ class GroupFrame(BaseFrame):
     frames: Sequence[SimpleFrame]
 
 
+def _invert_dict(d):
+    out = collections.defaultdict(set)
+    for k, v in d.items():
+        out[v].add(k)
+    return out
+
+
 class AliasModel:
     def _read(self, f, n):
         b = f.read(n)
@@ -175,4 +182,59 @@ class AliasModel:
         self.on_seam, self.tcs = self._read_tcs(f)
         self.faces_front, self.tris = self._read_tris(f)
         self.frames = self._read_frames(f)
+
+    @property
+    def disjoint_tri_sets(self):
+        vert_to_tris = collections.defaultdict(set)
+        for tri_idx, tri in enumerate(self.tris):
+            for vert_idx in tri:
+                vert_to_tris[vert_idx].add(tri_idx)
+        neighbours = {tri_idx: {o for vert_idx in tri for o in vert_to_tris[vert_idx]}
+                      for tri_idx, tri in enumerate(self.tris)}
+
+        # d will give the minimum tri_idx connected to the given tri_idx.
+        d = {tri_idx: tri_idx for tri_idx in range(len(self.tris))}
+        prev_d = None
+        while prev_d is None or d != prev_d:
+            prev_d = d
+            d = {tri_idx: min(d[o] for o in neighbours[tri_idx]) for tri_idx in range(len(self.tris))}
+
+        return list(_invert_dict(d).values())
+
+    def get_tri_tcs(self, tri_idx):
+        faces_front = self.faces_front[tri_idx]
+        tcs = self.tcs[self.tris[tri_idx]].astype(np.float)
+        on_seam = self.on_seam[self.tris[tri_idx]]
+        if not faces_front:
+            tcs[on_seam > 0, 0] += self.header['skin_width'] / 2
+
+        return tcs
+
+    def get_tri_skin(self, tri_idx, skin_idx):
+        # This function works by solving the equation v = A @ alpha, where
+        #   - A is the 3 TCs for the triangle, as columns, augmented with a 1 in the third row.
+        #   - v is a point in the image, which is being tested for being within the triangle, again augmented with a 1.
+        #   - alpha is the vector of coefficients for multiplying with the TCs, to give v.
+        #
+        # Augmenting the third row with ones ensures that the coefficients sum to 1.  Finally we use the property that
+        # in any such situation a point is inside the triange iff its coefficients are all positive, with some special
+        # handling for degenerate triangles.
+        tcs = self.get_tri_tcs(tri_idx).astype(np.int)
+        
+        x_min, y_min = np.min(tcs, axis=0)
+        x_max, y_max = np.max(tcs, axis=0)
+        
+        v = np.concatenate(np.meshgrid(np.arange(x_min, x_max),
+                                       np.arange(y_min, y_max),
+                                       [1]),
+                           axis=2)
+
+        A = np.concatenate([tcs.T, [[1, 1, 1]]])
+        if np.abs(np.linalg.det(A)) >= 1e-2:
+            alpha = (np.linalg.inv(A) @ v[..., None])[..., 0]
+            mask = np.all(alpha > 0, axis=2)
+        else:
+            mask = np.zeros(v.shape[:2], dtype=np.bool)
+
+        return mask, self.skins[skin_idx][y_min:y_max, x_min:x_max]
 
