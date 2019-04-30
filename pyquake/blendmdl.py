@@ -86,6 +86,9 @@ def load_mdl(pak_root, mdl_name, obj_name, frames, skin=0, fps=30):
     fname = f'progs/{mdl_name}.mdl'
     am = mdl.AliasModel(io.BytesIO(fs[fname]))
 
+    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+    pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
+
     obj = bpy.data.objects.new(obj_name, None)
     bpy.context.scene.collection.objects.link(obj)
     for tri_set_idx, tri_set in enumerate(am.disjoint_tri_sets):
@@ -113,9 +116,6 @@ def load_mdl(pak_root, mdl_name, obj_name, frames, skin=0, fps=30):
         # Set up material
         mat_name = f"{mdl_name}_{skin}"
         if mat_name not in bpy.data.materials:
-            pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
-            pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
-
             mat, nodes, links = blendmat.new_mat(mat_name)
             array_im, fullbright_array_im = blendmat.array_ims_from_indices(mat_name, pal, am.skins[skin])
             im = blendmat.im_from_array(mat_name, array_im)
@@ -131,5 +131,4 @@ def load_mdl(pak_root, mdl_name, obj_name, frames, skin=0, fps=30):
         _set_uvs(mesh, am, tri_set)
 
     return BlendMdl(am, blocks, obj)
-
 
