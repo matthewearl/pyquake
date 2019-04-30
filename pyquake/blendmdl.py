@@ -78,7 +78,18 @@ def _simplify_pydata(verts, tris):
     return ([verts[old_vert_idx] for old_vert_idx in vert_map], [], new_tris), vert_map
 
 
-def load_mdl(pak_root, mdl_name, obj_name, frames, skin=0, fps=30):
+def _get_tri_set_fullbright_frac(am, tri_set, skin_idx):
+    skin_area = 0
+    fullbright_area = 0
+    for tri_idx in tri_set:
+        mask, skin = am.get_tri_skin(tri_idx, skin_idx)
+        skin_area += np.sum(mask)
+        fullbright_area += np.sum(mask * (skin >= 224))
+
+    return fullbright_area / skin_area
+
+
+def load_mdl(pak_root, mdl_name, obj_name, frames, skin_idx=0, fps=30):
     frames = list(frames)
 
     # Load the alias model
@@ -114,16 +125,22 @@ def load_mdl(pak_root, mdl_name, obj_name, frames, skin=0, fps=30):
         _animate(am, blocks, subobj, frames, fps)
 
         # Set up material
-        mat_name = f"{mdl_name}_{skin}"
+        fullbright_frac = _get_tri_set_fullbright_frac(am, tri_set, skin_idx)
+        sample_as_light = fullbright_frac > 0.8
+        mat_name = f"{mdl_name}_skin{skin_idx}"
+        if sample_as_light:
+            mat_name = f"{mat_name}_fullbright"
         if mat_name not in bpy.data.materials:
             mat, nodes, links = blendmat.new_mat(mat_name)
-            array_im, fullbright_array_im = blendmat.array_ims_from_indices(mat_name, pal, am.skins[skin])
+            array_im, fullbright_array_im = blendmat.array_ims_from_indices(mat_name, pal, am.skins[skin_idx])
             im = blendmat.im_from_array(mat_name, array_im)
             if fullbright_array_im is not None:
                 fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
-                blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, 1.0)
+                strength = 10_000. if sample_as_light else 1.0
+                blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, strength)
             else:
                 blendmat.setup_diffuse_material(nodes, links, im)
+            mat.cycles.sample_as_light = sample_as_light
         mat = bpy.data.materials[mat_name]
 
         # Apply the material
