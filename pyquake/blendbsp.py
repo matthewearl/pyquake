@@ -10,47 +10,25 @@ from .bsp import Bsp, Face
 from . import pak, blendmat
 
 
-_EXTRA_BRIGHT_TEXTURES = {
-    'tlight02': (30, True),
-    'tlight07': (1000, True),
-    'tlight11': (1000, True),
-    'tlight01': (10_000, True),
-    'sliplite': (100, True),
-    'slipside': (100, True),
-    '+0basebtn': (1000, True),
-}
-
-
-_LIGHT_TINT = {
-    'tlight11': [1., 0.85, 0.7, 1.],
-    'tlight01': [1., 0.80, 1., 1.],
-    'tlight07': [1., 1., 3.33, 1.],
-}
-
-
-_EMISSION_COLORS= {
-    '*slime0': (0., 1., 0.),
-}
-
-
 _ALL_FULLBRIGHT_IN_OVERLAY = True
 _FULLBRIGHT_OBJECT_OVERLAY = True
 
 
-def _texture_to_arrays(pal, texture, light_tint):
+def _texture_to_arrays(pal, texture, light_tint=(1, 1, 1, 1)):
     im_indices = np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))
-    return blendmat.array_ims_from_indices(pal, texture, im_indices, light_tint=light_tint, gamma=0.8)
+    return blendmat.array_ims_from_indices(pal, im_indices, light_tint=light_tint, gamma=0.8)
 
 
-def _load_images(pal, bsp):
+def _load_images(pal, bsp, map_cfg):
     ims = []
     fullbright_ims = []
     for texture_id, texture in enumerate(bsp.textures):
-        array_im, fullbright_array_im = _texture_to_arrays(pal, texture, _LIGHT_TINT[texture.name])
-        im = blentmat.im_from_array(texture.name, array_im)
+        tex_cfg = _get_texture_config(texture, map_cfg)
+        array_im, fullbright_array_im = _texture_to_arrays(pal, texture, tex_cfg['tint'])
+        im = blendmat.im_from_array(texture.name, array_im)
 
         if fullbright_array_im is not None:
-            fullbright_im = blentmat.im_from_array(f"{texture.name}_fullbright", fullbright_array_im)
+            fullbright_im = blendmat.im_from_array(f"{texture.name}_fullbright", fullbright_array_im)
         else:
             fullbright_im = None
 
@@ -60,32 +38,40 @@ def _load_images(pal, bsp):
     return ims, fullbright_ims
 
 
-def _load_material(texture_id, texture, ims, fullbright_ims):
+def _get_texture_config(texture, map_config):
+    cfg = map_config['textures']['__default__']
+    cfg.update(map_config['textures'].get(texture.name, {}))
+    return cfg
+
+
+def _load_material(texture_id, texture, ims, fullbright_ims, map_cfg):
     im = ims[texture_id]
     fullbright_im = fullbright_ims[texture_id]
 
     mat, nodes, links = blendmat.new_mat('{}_main'.format(texture.name))
 
-    strength, sample_as_light = _EXTRA_BRIGHT_TEXTURES.get(texture.name, (1, False))
+    tex_cfg = _get_texture_config(texture, map_cfg)
 
     if fullbright_im is not None:
-        if _FULLBRIGHT_OBJECT_OVERLAY and (_ALL_FULLBRIGHT_IN_OVERLAY or strength > 1):
+        if map_cfg['fullbright_object_overlay'] and tex_cfg['overlay']:
             blendmat.setup_diffuse_material(nodes, links, im)
+            mat.cycles.sample_as_light = False
         else:
-            blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, strength)
-            mat.cycles.sample_as_light = sample_as_light
+            blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, tex_cfg['strength'])
+            mat.cycles.sample_as_light = tex_cfg['sample_as_light']
     else:
         blendmat.setup_diffuse_material(nodes, links, im)
+        mat.cycles.sample_as_light = False
 
 
-def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims):
+def _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims, map_cfg):
     im = ims[texture_id]
     fullbright_im = fullbright_ims[texture_id]
     if fullbright_im is not None:
         mat, nodes, links = blendmat.new_mat('{}_fullbright'.format(texture.name))
-        strength, sample_as_light =_EXTRA_BRIGHT_TEXTURES.get(texture.name, (1, False))
-        blendmat.setup_transparent_fullbright_material(nodes, links, im, fullbright_im, strength)
-        mat.cycles.sample_as_light = sample_as_light
+        tex_cfg = _get_texture_config(texture, map_cfg)
+        blendmat.setup_transparent_fullbright_material(nodes, links, im, fullbright_im, tex_cfg['strength'])
+        mat.cycles.sample_as_light = tex_cfg['sample_as_light']
 
 
 def _set_uvs(mesh, texinfos, faces):
@@ -206,7 +192,7 @@ def _pydata_from_faces(tuple_faces):
     return verts, [], int_faces
 
 
-def _load_fullbright_objects(model, map_name, pal, do_materials):
+def _load_fullbright_objects(model, map_name, pal, do_materials, map_cfg):
     # Calculate bounding boxes for regions of full brightness.
     bboxes = {}
     for texture in {f.tex_info.texture for f in model.faces}:
@@ -224,7 +210,8 @@ def _load_fullbright_objects(model, map_name, pal, do_materials):
         texinfo = face.tex_info
         texture = texinfo.texture
         bbox = bboxes.get(texture)
-        if bbox is None or (not _ALL_FULLBRIGHT_IN_OVERLAY and texture.name not in _EXTRA_BRIGHT_TEXTURES):
+        tex_cfg = _get_texture_config(texture, map_cfg)
+        if bbox is None or not tex_cfg['overlay']:
             continue
 
         tex_size = np.array([texture.width, texture.height])
@@ -304,33 +291,35 @@ class BlendBsp(NamedTuple):
                 self.fullbright_objects[face].hide_render = face not in visible_faces
 
 
-def load_bsp(pak_root, map_name, do_materials=True):
+def load_bsp(pak_root, map_name, config):
     fs = pak.Filesystem(pak_root)
     fname = 'maps/{}.bsp'.format(map_name)
     bsp = Bsp(io.BytesIO(fs[fname]))
     pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
-    if do_materials:
-        ims, fullbright_ims = _load_images(pal, bsp)
+    map_cfg = config['maps'][fname]
+
+    if map_cfg['do_materials']:
+        ims, fullbright_ims = _load_images(pal, bsp, map_cfg)
 
         for texture_id, texture in enumerate(bsp.textures):
-            _load_material(texture_id, texture, ims, fullbright_ims)
+            _load_material(texture_id, texture, ims, fullbright_ims, map_cfg)
     
-        if _FULLBRIGHT_OBJECT_OVERLAY:
+        if map_cfg['fullbright_object_overlay']:
             for texture_id, texture in enumerate(bsp.textures):
-                _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims)
+                _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims, map_cfg)
 
     map_obj = bpy.data.objects.new(map_name, None)
     bpy.context.scene.collection.objects.link(map_obj)
 
     fullbright_objects = {}
     for model_id, model in enumerate(bsp.models):
-        model_obj = _load_object(model_id, model, map_name, do_materials)
+        model_obj = _load_object(model_id, model, map_name, map_cfg['do_materials'])
         model_obj.parent = map_obj
 
-        if _FULLBRIGHT_OBJECT_OVERLAY:
-            model_fullbright_objects = _load_fullbright_objects(model, map_name, pal, do_materials)
+        if map_cfg['fullbright_object_overlay']:
+            model_fullbright_objects = _load_fullbright_objects(model, map_name, pal, map_cfg['do_materials'], map_cfg)
         else:
             model_fullbright_objects = {}
 

@@ -19,7 +19,7 @@ def im_from_array(name, array_im):
     return im
 
 
-def array_ims_from_indices(name, pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1)):
+def array_ims_from_indices(pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1)):
     fullbright_array = (im_indices >= 224)
 
     array_im = pal[im_indices]
