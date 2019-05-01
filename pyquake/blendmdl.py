@@ -132,7 +132,7 @@ def load_mdl(pak_root, mdl_name, obj_name, frames, skin_idx=0, fps=30):
             mat_name = f"{mat_name}_fullbright"
         if mat_name not in bpy.data.materials:
             mat, nodes, links = blendmat.new_mat(mat_name)
-            array_im, fullbright_array_im = blendmat.array_ims_from_indices(pal, am.skins[skin_idx])
+            array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(pal, am.skins[skin_idx])
             im = blendmat.im_from_array(mat_name, array_im)
             if fullbright_array_im is not None:
                 fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)

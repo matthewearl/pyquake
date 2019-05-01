@@ -24,7 +24,7 @@ def _load_images(pal, bsp, map_cfg):
     fullbright_ims = []
     for texture_id, texture in enumerate(bsp.textures):
         tex_cfg = _get_texture_config(texture, map_cfg)
-        array_im, fullbright_array_im = _texture_to_arrays(pal, texture, tex_cfg['tint'])
+        array_im, fullbright_array_im, _ = _texture_to_arrays(pal, texture, tex_cfg['tint'])
         im = blendmat.im_from_array(texture.name, array_im)
 
         if fullbright_array_im is not None:
@@ -196,9 +196,9 @@ def _load_fullbright_objects(model, map_name, pal, do_materials, map_cfg):
     # Calculate bounding boxes for regions of full brightness.
     bboxes = {}
     for texture in {f.tex_info.texture for f in model.faces}:
-        _, fullbright_array_im = _texture_to_arrays(pal, texture)
-        if fullbright_array_im is not None:
-            bboxes[texture] = _get_bbox(fullbright_array_im)
+        _, _, fullbright_array = _texture_to_arrays(pal, texture)
+        if np.any(fullbright_array):
+            bboxes[texture] = _get_bbox(fullbright_array)
 
     fullbright_objects = {}
 

@@ -32,7 +32,7 @@ def array_ims_from_indices(pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1)):
     else:
         fullbright_array_im = None
 
-    return array_im, fullbright_array_im
+    return array_im, fullbright_array_im, fullbright_array
 
 
 def new_mat(name):
