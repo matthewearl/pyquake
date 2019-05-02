@@ -27,6 +27,7 @@ __all__ = (
 import collections
 import collections.abc
 import glob
+import io
 import logging
 import os
 import struct
@@ -85,6 +86,9 @@ class Filesystem(collections.abc.Mapping):
         with open(entry.pak_file, "rb") as f:
             f.seek(entry.offset)
             return self._read(f, entry.size)
+
+    def open(self, fname):
+        return io.BytesIO(self[fname])
 
     def __iter__(self):
         return iter(self._index)

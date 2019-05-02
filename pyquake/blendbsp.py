@@ -1,8 +1,8 @@
-import io
 import logging
 from typing import NamedTuple, Optional, Any, Dict
 
 import bpy
+import bpy_types
 import bmesh
 import numpy as np
 
@@ -279,7 +279,9 @@ def _load_object(model_id, model, map_name, do_materials):
 
 class BlendBsp(NamedTuple):
     bsp: Bsp
-    fullbright_objects: Optional[Dict[Face, Any]]
+    map_obj: bpy_types.Object
+    model_objs: Dict[int, bpy_types.Object]
+    fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
 
     def hide_invisible_fullbright_objects(self, pos):
         leaf = self.bsp.models[0].get_leaf(pos)
@@ -294,11 +296,14 @@ class BlendBsp(NamedTuple):
 def load_bsp(pak_root, map_name, config):
     fs = pak.Filesystem(pak_root)
     fname = 'maps/{}.bsp'.format(map_name)
-    bsp = Bsp(io.BytesIO(fs[fname]))
-    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+    bsp = Bsp(fs.open(fname))
+    return add_bsp(bsp, map_name, config)
+
+
+def add_bsp(bsp, pal, map_name, config):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
-    map_cfg = config['maps'][fname]
+    map_cfg = config['maps'][map_name]
 
     if map_cfg['do_materials']:
         ims, fullbright_ims = _load_images(pal, bsp, map_cfg)
@@ -314,9 +319,11 @@ def load_bsp(pak_root, map_name, config):
     bpy.context.scene.collection.objects.link(map_obj)
 
     fullbright_objects = {}
+    model_objs = {}
     for model_id, model in enumerate(bsp.models):
         model_obj = _load_object(model_id, model, map_name, map_cfg['do_materials'])
         model_obj.parent = map_obj
+        model_objs[model_id] = model_obj
 
         if map_cfg['fullbright_object_overlay']:
             model_fullbright_objects = _load_fullbright_objects(model, map_name, pal, map_cfg['do_materials'], map_cfg)
@@ -328,4 +335,4 @@ def load_bsp(pak_root, map_name, config):
 
         fullbright_objects.update(model_fullbright_objects)
 
-    return BlendBsp(bsp, fullbright_objects)
+    return BlendBsp(bsp, map_obj, model_objs, fullbright_objects)

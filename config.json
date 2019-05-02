@@ -1,6 +1,6 @@
 {
     "maps": {
-        "maps/e1m1.bsp": {
+        "e1m1": {
             "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
