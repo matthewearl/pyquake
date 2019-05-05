@@ -283,21 +283,28 @@ class BlendBsp(NamedTuple):
     model_objs: Dict[int, bpy_types.Object]
     fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
 
-    def hide_invisible_fullbright_objects(self, pos):
-        leaf = self.bsp.models[0].get_leaf(pos)
-        visible_leaves = {next_leaf for leaf in leaf.visible_leaves for next_leaf in leaf.visible_leaves}
+    def hide_invisible_fullbright_objects(self, pos, *, bounces=1):
+        visible_leaves = {self.bsp.models[0].get_leaf(pos)}
+        for _ in range(bounces):
+            visible_leaves = {l2 for l1 in visible_leaves for l2 in l1.visible_leaves}
         visible_faces = {f for l in visible_leaves for f in l.faces}
 
         for face in self.bsp.models[0].faces:
             if face in self.fullbright_objects:
                 self.fullbright_objects[face].hide_render = face not in visible_faces
 
+    def insert_fullbright_object_visibility_keyframe(self, frame):
+        for face in self.bsp.models[0].faces:
+            if face in self.fullbright_objects:
+                self.fullbright_objects[face].keyframe_insert('hide_render', frame=frame)
+
 
 def load_bsp(pak_root, map_name, config):
     fs = pak.Filesystem(pak_root)
     fname = 'maps/{}.bsp'.format(map_name)
     bsp = Bsp(fs.open(fname))
-    return add_bsp(bsp, map_name, config)
+    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+    return add_bsp(bsp, pal, map_name, config)
 
 
 def add_bsp(bsp, pal, map_name, config):

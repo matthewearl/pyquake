@@ -89,13 +89,16 @@ def _get_tri_set_fullbright_frac(am, tri_set, skin_idx):
     return fullbright_area / skin_area
 
 
-def add_model(am, mdl_name, obj_name, frames, skin_idx=0, fps=30):
+def load_model(pak_root, mdl_name, obj_name, frames, skin_idx=0, fps=30):
+    fs = pak.Filesystem(pak_root)
+    am = mdl.AliasModel(fs.open(f"progs/{mdl_name}.mdl"))
+    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+    add_model(am, pal, mdl_name, obj_name, frames, skin_idx, fps)
+
+
+def add_model(am, pal, mdl_name, obj_name, frames, skin_idx=0, fps=30):
     frames = list(frames)
 
-    # Load the alias model
-    am = mdl.AliasModel(io.BytesIO(fs[fname]))
-
-    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
     obj = bpy.data.objects.new(obj_name, None)
