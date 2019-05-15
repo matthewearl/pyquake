@@ -39,7 +39,7 @@ def _load_images(pal, bsp, map_cfg):
 
 
 def _get_texture_config(texture, map_config):
-    cfg = map_config['textures']['__default__']
+    cfg = dict(map_config['textures']['__default__'])
     cfg.update(map_config['textures'].get(texture.name, {}))
     return cfg
 
@@ -238,19 +238,20 @@ def _load_fullbright_objects(model, map_name, pal, do_materials, map_cfg):
                     new_faces.append(new_face)
                     new_bsp_faces.append(face)
 
-        # Actually make the mesh and add it to the scene
-        mesh = bpy.data.meshes.new(map_name)
-        mesh.from_pydata(*_pydata_from_faces(new_faces))
+        if new_faces:
+            # Actually make the mesh and add it to the scene
+            mesh = bpy.data.meshes.new(map_name)
+            mesh.from_pydata(*_pydata_from_faces(new_faces))
 
-        obj = bpy.data.objects.new(f'{map_name}_fullbright_{face_id}', mesh)
-        bpy.context.scene.collection.objects.link(obj)
+            obj = bpy.data.objects.new(f'{map_name}_fullbright_{face_id}', mesh)
+            bpy.context.scene.collection.objects.link(obj)
 
-        fullbright_objects[face] = obj
+            fullbright_objects[face] = obj
 
-        if do_materials:
-            texinfos = [face.tex_info for face in new_bsp_faces]
-            _set_uvs(mesh, texinfos, new_faces)
-            _apply_materials(model, mesh, new_bsp_faces, 'fullbright')
+            if do_materials:
+                texinfos = [face.tex_info for face in new_bsp_faces]
+                _set_uvs(mesh, texinfos, new_faces)
+                _apply_materials(model, mesh, new_bsp_faces, 'fullbright')
 
     return fullbright_objects
 
@@ -291,7 +292,8 @@ class BlendBsp(NamedTuple):
 
         for face in self.bsp.models[0].faces:
             if face in self.fullbright_objects:
-                self.fullbright_objects[face].hide_render = face not in visible_faces
+                hide = face not in visible_faces
+                self.fullbright_objects[face].hide_render = hide
 
     def insert_fullbright_object_visibility_keyframe(self, frame):
         for face in self.bsp.models[0].faces:

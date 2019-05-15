@@ -12,7 +12,7 @@
                 },
                 "tlight02": {
                     "strength": 30,
-                    "sample_as_light": true
+                    "sample_as_light": false
                 },
                 "tlight07": {
                     "strength": 1000,
@@ -31,15 +31,15 @@
                 },
                 "sliplite": {
                     "strength": 100,
-                    "sample_as_light": true
+                    "sample_as_light": false
                 },
                 "slipside": {
                     "strength": 100,
-                    "sample_as_light": true
+                    "sample_as_light": false
                 },
                 "+0basebtn": {
                     "strength": 1000,
-                    "sample_as_light": true
+                    "sample_as_light": false
                 }
             }
         }
