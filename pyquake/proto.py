@@ -575,11 +575,11 @@ class ServerMessageClientData(ServerMessage):
 
         fix_velocity = lambda v: v * 16
         punch1, m = cls._parse_optional(_ClientDataFlags.PUNCH1, flags, "<B", m)
-        m_velocity1, m = cls._parse_optional(_ClientDataFlags.VELOCITY1, flags, "<B", m, fix_velocity)
+        m_velocity1, m = cls._parse_optional(_ClientDataFlags.VELOCITY1, flags, "<b", m, fix_velocity)
         punch2, m = cls._parse_optional(_ClientDataFlags.PUNCH2, flags, "<B", m)
-        m_velocity2, m = cls._parse_optional(_ClientDataFlags.VELOCITY2, flags, "<B", m, fix_velocity)
+        m_velocity2, m = cls._parse_optional(_ClientDataFlags.VELOCITY2, flags, "<b", m, fix_velocity)
         punch3, m = cls._parse_optional(_ClientDataFlags.PUNCH3, flags, "<B", m)
-        m_velocity3, m = cls._parse_optional(_ClientDataFlags.VELOCITY3, flags, "<B", m, fix_velocity)
+        m_velocity3, m = cls._parse_optional(_ClientDataFlags.VELOCITY3, flags, "<b", m, fix_velocity)
         punch_angles = (punch1, punch2, punch3)
         m_velocity = (m_velocity1, m_velocity2, m_velocity3)
 
