@@ -55,6 +55,10 @@ class Simplex(NamedTuple):
         M = np.concatenate([self.constraints[~self.basic_mask], _one_hot_encode(self.dim, self.dim + 1)[None, :]])
         return np.linalg.inv(M)
 
+    @property
+    def pos(self):
+        return self.vert_to_world[:-1, -1]
+
     def follow_edge(self, free_idx):
         # B are the constraints in the coordinate space of the current non-basic (free) variables.
         B = self.constraints[self.basic_mask] @ self.vert_to_world

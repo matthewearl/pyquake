@@ -31,11 +31,12 @@ import functools
 import itertools
 import logging
 import struct
-from typing import NamedTuple, Tuple, List
+from typing import NamedTuple, Tuple, List, Iterable
 
 import numpy as np
 
 from . import ent
+from . import simplex
 
 
 def _listify(f):
@@ -60,7 +61,7 @@ class Plane(NamedTuple):
     plane_type: PlaneType
 
 
-class BBoxShort(NamedTuple):
+class BBox(NamedTuple):
     mins: Tuple[int, int, int]
     maxs: Tuple[int, int, int]
 
@@ -69,7 +70,7 @@ class Node(NamedTuple):
     bsp: "Bsp"
     plane_id: int
     child_ids: Tuple[int, int]
-    bbox: BBoxShort
+    bbox: BBox
     face_id: int
     num_faces: int
 
@@ -86,12 +87,36 @@ class Node(NamedTuple):
         else:
             return self.bsp.nodes[self.child_ids[child_num]]
 
+    def _get_childs_leaves_from_simplex(self, child_num: int, sx: simplex.Simplex) -> Iterable["Leaf"]:
+        if self.child_is_leaf(child_num):
+            l = self.get_child(child_num)
+            if l.num_faces > 0:
+                yield l
+        else:
+            yield from self.get_child(child_num).get_leaves_from_simplex(sx)
+
+    def get_leaves_from_simplex(self, sx: simplex.Simplex) -> Iterable["Leaf"]:
+        """Return an iterable of leaves under this node that intersect the given simplex."""
+        p = np.concatenate([self.plane.normal, [-self.plane.dist]])
+
+        if np.dot(sx.optimize(p[:-1]).pos, p[:-1]) + p[-1] < 0:
+            # completely behind 
+            yield from self._get_childs_leaves_from_simplex(1, sx)
+        elif np.dot(sx.optimize(-p[:-1]).pos, p[:-1]) + p[-1] > 0:
+            # completely infront
+            yield from self._get_childs_leaves_from_simplex(0, sx)
+        else:
+            infront_sx = sx.add_constraint(p)
+            yield from self._get_childs_leaves_from_simplex(0, infront_sx)
+            behind_sx = sx.add_constraint(-p)
+            yield from self._get_childs_leaves_from_simplex(1, behind_sx)
+
 
 class Leaf(NamedTuple):
     bsp: "Bsp"
     contents: int
     vis_offset: int
-    bbox: BBoxShort
+    bbox: BBox
     face_list_idx: int
     num_faces: int
 
@@ -242,7 +267,7 @@ class Model(NamedTuple):
     def node(self):
         return self.bsp.nodes[self.node_id]
 
-    def get_leaf(self, point):
+    def get_leaf_from_point(self, point):
         point = np.array(point)
         node = self.node
         while True:
@@ -251,6 +276,12 @@ class Model(NamedTuple):
             if node.child_is_leaf(child_num):
                 return child
             node = child
+
+    def get_leaves_from_bbox(self, bbox: BBox) -> Iterable[Leaf]:
+        """Return an iterable of leaves that intersect the given bounding box"""
+        n = self.node
+        sx = simplex.Simplex.from_bbox(bbox.mins, bbox.maxs)
+        return n.get_leaves_from_simplex(sx)
 
 
 class Texture(NamedTuple):
@@ -366,14 +397,14 @@ class Bsp:
 
         logging.debug("Reading nodes")
         def read_node(plane_id, c1, c2, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_id, num_faces):
-            bbox = BBoxShort((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
+            bbox = BBox((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
             return Node(self, plane_id, (c1, c2), bbox, face_id, num_faces)
         self.nodes = self._read_lump(f, self._read_dir_entry(f, 5), "<lhhhhhhhhHH", read_node)
 
         logging.debug("Reading leaves")
         def read_leaf(contents, vis_offset, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_list_idx, num_faces, l1, l2,
                       l3, l4):
-            bbox = BBoxShort((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
+            bbox = BBox((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
             return Leaf(self, contents, vis_offset, bbox, face_list_idx, num_faces)
         self.leaves = self._read_lump(f, self._read_dir_entry(f, 10), "<llhhhhhhHHBBBB", read_leaf)
 

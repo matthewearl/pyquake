@@ -232,16 +232,6 @@ def _ray_bsp_intersect(model: bsp.Model, ray: Ray, near_clip=0., far_clip=np.inf
     return nearest_face, nearest_poi, nearest_dist, nearest_leaf
 
 
-def _get_leaf_from_point(model: bsp.Model, point: np.ndarray):
-    node = model.node
-    while True:
-        child_num = 0 if _infront(point, node.plane.normal, node.plane.dist) else 1
-        child = node.get_child(child_num) 
-        if node.child_is_leaf(child_num):
-            return child
-        node = child
-
-
 def raytracer_main2():
     import io
     import sys
@@ -279,7 +269,7 @@ def raytracer_main2():
         ray_dir = rot @ K_inv @ np.array([x, y, 1])
         return ray_dir / np.linalg.norm(ray_dir)
 
-    origin_leaf = bsp.models[0].get_leaf(ray_origin)
+    origin_leaf = bsp.models[0].get_leaf_from_point(ray_origin)
     visible_leaves = list(origin_leaf.visible_leaves)
     vis_faces = list({f for l in origin_leaf.visible_leaves for f in l.faces})
     print("Num visible leaves %s %s, num vis faces", len(visible_leaves), len(set(visible_leaves)), len(vis_faces))

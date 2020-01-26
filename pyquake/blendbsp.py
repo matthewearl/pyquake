@@ -278,6 +278,9 @@ def _load_object(model_id, model, map_name, do_materials):
     return obj
 
 
+#def _get_model_leaves(model
+#
+
 class BlendBsp(NamedTuple):
     bsp: Bsp
     map_obj: bpy_types.Object
@@ -285,7 +288,7 @@ class BlendBsp(NamedTuple):
     fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
 
     def hide_invisible_fullbright_objects(self, pos, *, bounces=1):
-        visible_leaves = {self.bsp.models[0].get_leaf(pos)}
+        visible_leaves = {self.bsp.models[0].get_leaf_from_point(pos)}
         for _ in range(bounces):
             visible_leaves = {l2 for l1 in visible_leaves for l2 in l1.visible_leaves}
         visible_faces = {f for l in visible_leaves for f in l.faces}
@@ -294,6 +297,10 @@ class BlendBsp(NamedTuple):
             if face in self.fullbright_objects:
                 hide = face not in visible_faces
                 self.fullbright_objects[face].hide_render = hide
+
+        # TODO: Finish the function definition above and do these calls
+        #for model in self.bsp.models[1:]:
+        #    _get_model_leaves
 
     def insert_fullbright_object_visibility_keyframe(self, frame):
         for face in self.bsp.models[0].faces:
