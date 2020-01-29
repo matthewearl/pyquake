@@ -195,7 +195,8 @@ class AsyncClient:
         self._moved_fut = collections.defaultdict(asyncio.Future)
         self.center_print_queue = asyncio.Queue()
         self.origins = {}
-        self._angles = (0., 0., 0.)
+        self.angles = (0., 0., 0.)
+        self.velocity = (0., 0., 0.)
 
         self._demos = []
 
@@ -246,7 +247,11 @@ class AsyncClient:
 
                 # Set view angle
                 if parsed.msg_type == proto.ServerMessageType.SETANGLE:
-                    self._angles = parsed.view_angles
+                    self.angles = parsed.view_angles
+
+                # Set velocity
+                if parsed.msg_type == proto.ServerMessageType.CLIENTDATA:
+                    self.velocity = parsed.m_velocity
 
                 # Update entity positions
                 if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
@@ -277,7 +282,7 @@ class AsyncClient:
 
             self._demos = [d for d in self._demos if not d.recording_complete]
             for demo in self._demos:
-                demo.add_message(self._angles, msg, has_server_info)
+                demo.add_message(self.angles, msg, has_server_info)
 
     async def wait_for_movement(self, entity_num):
         return await self._moved_fut[entity_num]
@@ -299,7 +304,7 @@ class AsyncClient:
         return client
 
     def move(self, pitch, yaw, roll, forward, side, up, buttons, impulse):
-        self._angles = (pitch, yaw, roll)
+        self.angles = (pitch, yaw, roll)
         self._conn.send(_make_move_body(pitch, yaw, roll,
                                         forward, side, up, buttons, impulse))
 

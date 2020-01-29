@@ -174,6 +174,11 @@ def _register_server_message(cls):
     _MESSAGE_CLASSES[cls.msg_type] = cls
 
 
+_DEFAULT_VIEW_HEIGHT = 22
+_DEFAULT_SOUND_PACKET_ATTENUATION = 1.0
+_DEFAULT_SOUND_PACKET_VOLUME = 255
+
+
 class ServerMessage:
     field_names = None
 
@@ -228,14 +233,14 @@ class ServerMessage:
         return cls._parse_tuple(3, cls._parse_coord, m)
 
     @classmethod
-    def _parse_optional(cls, bit, flags, fmt, m, post_func=None):
+    def _parse_optional(cls, bit, flags, fmt, m, post_func=None, default=None):
         if bit & flags:
             (val,), m = cls._parse_struct(fmt, m)
             if post_func:
                 val = post_func(val)
             return val, m
         else:
-            return None, m
+            return default, m
 
     @classmethod
     def parse_message(cls, m):
@@ -570,16 +575,20 @@ class ServerMessageClientData(ServerMessage):
         (flags_int,), m = cls._parse_struct("<H", m)
         flags = _ClientDataFlags(flags_int)
 
-        view_height, m = cls._parse_optional(_ClientDataFlags.VIEWHEIGHT, flags, "<B", m)
-        ideal_pitch, m = cls._parse_optional(_ClientDataFlags.IDEALPITCH, flags, "<B", m)
+        view_height, m = cls._parse_optional(_ClientDataFlags.VIEWHEIGHT, flags, "<B", m,
+                                             default=_DEFAULT_VIEW_HEIGHT)
+        ideal_pitch, m = cls._parse_optional(_ClientDataFlags.IDEALPITCH, flags, "<B", m, default=0)
 
         fix_velocity = lambda v: v * 16
-        punch1, m = cls._parse_optional(_ClientDataFlags.PUNCH1, flags, "<B", m)
-        m_velocity1, m = cls._parse_optional(_ClientDataFlags.VELOCITY1, flags, "<b", m, fix_velocity)
-        punch2, m = cls._parse_optional(_ClientDataFlags.PUNCH2, flags, "<B", m)
-        m_velocity2, m = cls._parse_optional(_ClientDataFlags.VELOCITY2, flags, "<b", m, fix_velocity)
-        punch3, m = cls._parse_optional(_ClientDataFlags.PUNCH3, flags, "<B", m)
-        m_velocity3, m = cls._parse_optional(_ClientDataFlags.VELOCITY3, flags, "<b", m, fix_velocity)
+        punch1, m = cls._parse_optional(_ClientDataFlags.PUNCH1, flags, "<B", m, default=0)
+        m_velocity1, m = cls._parse_optional(_ClientDataFlags.VELOCITY1, flags, "<b", m, fix_velocity,
+                                             default=0)
+        punch2, m = cls._parse_optional(_ClientDataFlags.PUNCH2, flags, "<B", m, default=0)
+        m_velocity2, m = cls._parse_optional(_ClientDataFlags.VELOCITY2, flags, "<b", m, fix_velocity,
+                                             default=0)
+        punch3, m = cls._parse_optional(_ClientDataFlags.PUNCH3, flags, "<B", m, default=0)
+        m_velocity3, m = cls._parse_optional(_ClientDataFlags.VELOCITY3, flags, "<b", m, fix_velocity,
+                                             default=0)
         punch_angles = (punch1, punch2, punch3)
         m_velocity = (m_velocity1, m_velocity2, m_velocity3)
 
@@ -589,9 +598,9 @@ class ServerMessageClientData(ServerMessage):
         on_ground = bool(flags & _ClientDataFlags.ONGROUND)
         in_water = bool(flags & _ClientDataFlags.INWATER)
 
-        weapon_frame, m = cls._parse_optional(_ClientDataFlags.WEAPONFRAME, flags, "<B", m)
-        armor, m = cls._parse_optional(_ClientDataFlags.ARMOR, flags, "<B", m)
-        weapon_model_index, m = cls._parse_optional(_ClientDataFlags.WEAPON, flags, "<B", m)
+        weapon_frame, m = cls._parse_optional(_ClientDataFlags.WEAPONFRAME, flags, "<B", m, default=0)
+        armor, m = cls._parse_optional(_ClientDataFlags.ARMOR, flags, "<B", m, default=0)
+        weapon_model_index, m = cls._parse_optional(_ClientDataFlags.WEAPON, flags, "<B", m, default=0)
 
         (health, ammo, shells, nails, rockets, cells, active_weapon), m = cls._parse_struct("<HBBBBBB", m)
         active_weapon = ItemFlags(active_weapon)
@@ -626,8 +635,10 @@ class ServerMessageSound(ServerMessage):
     def parse(cls, m):
         flags, m = _SoundFlags(m[0]), m[1:]
 
-        volume, m = cls._parse_optional(_SoundFlags.VOLUME, flags, "<B", m)
-        attenuation, m = cls._parse_optional(_SoundFlags.ATTENUATION, flags, "<B", m, lambda b: b / 64.)
+        volume, m = cls._parse_optional(_SoundFlags.VOLUME, flags, "<B", m,
+                                        default=_DEFAULT_SOUND_PACKET_VOLUME)
+        attenuation, m = cls._parse_optional(_SoundFlags.ATTENUATION, flags, "<B", m, lambda b: b / 64.,
+                                             default=_DEFAULT_SOUND_PACKET_ATTENUATION)
 
         (t,), m = cls._parse_struct("<H", m)
         entity_num = t >> 3
