@@ -1,5 +1,17 @@
 {
     "maps": {
+        "100m": {
+            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                }
+            }
+        },
         "e1m1": {
             "do_materials": true,
             "fullbright_object_overlay": true,
