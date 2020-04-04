@@ -46,7 +46,7 @@ class AliasModelEntityFrame:
 class AliasModelEntity:
     model_path: str
     path: List[AliasModelEntityFrame]
-    
+
 
 class AliasModelAnimator:
     def __init__(self, world_obj, fs, pal, fps=30):
@@ -82,7 +82,7 @@ class AliasModelAnimator:
                 ame.path.append(ame.path[-1].update(time, parsed.origin, parsed.angle, parsed.frame, parsed.skin))
 
     def _path_to_model_name(self, mdl_path):
-        m = re.match("progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
+        m = re.match(r"progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
         if m is None:
             raise Exception("Unexpected model path {mdl_path}")
         return m.group(1)
@@ -110,9 +110,9 @@ class AliasModelAnimator:
                 if fr.time is not None:
                     bm.obj.location = fr.origin
                     bm.obj.keyframe_insert('location', frame=int(self._fps * fr.time))
-                    bm.obj.rotation_euler = (0., 0., fr.angles[1]) # ¯\_(ツ)_/¯ 
+                    bm.obj.rotation_euler = (0., 0., fr.angles[1])  # ¯\_(ツ)_/¯
                     bm.obj.keyframe_insert('rotation_euler', frame=int(self._fps * fr.time))
-                          
+
 
 class LevelAnimator:
     def __init__(self, world_obj, fs, pal, config, fps=30):
@@ -160,7 +160,8 @@ class LevelAnimator:
             frame = int(self._fps * time)
             if parsed.entity_num in self._entity_origins:
                 model_num = self._entity_to_model[parsed.entity_num]
-                self._entity_origins[parsed.entity_num] = _patch_vec(self._entity_origins[parsed.entity_num], parsed.origin)
+                self._entity_origins[parsed.entity_num] = _patch_vec(self._entity_origins[parsed.entity_num],
+                                                                     parsed.origin)
 
                 model_obj = self._bb.model_objs[model_num - 1]
                 model_obj.location = self._entity_origins[parsed.entity_num]
@@ -180,22 +181,24 @@ class LevelAnimator:
     def done(self):
         pass
 
-def add_demo(demo_file, fs, config, fps=30):
+
+def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo', load_level=True):
     pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
-    world_obj = bpy.data.objects.new('demo', None)
+    world_obj = bpy.data.objects.new(world_obj_name, None)
     bpy.context.scene.collection.objects.link(world_obj)
 
-    level_animator = LevelAnimator(world_obj, fs, pal, config, fps)
+    if load_level:
+        level_animator = LevelAnimator(world_obj, fs, pal, config, fps)
     am_animator = AliasModelAnimator(world_obj, fs, pal, fps)
 
     time = None
     for view_angles, parsed in proto.read_demo_file(demo_file):
         if parsed.msg_type == proto.ServerMessageType.TIME:
             time = parsed.time
-        level_animator.handle_parsed(view_angles, parsed, time)
+        if load_level:
+            level_animator.handle_parsed(view_angles, parsed, time)
         am_animator.handle_parsed(view_angles, parsed, time)
 
-    level_animator.done()
+    if load_level:
+        level_animator.done()
     am_animator.done()
-
-    return level_animator._bb
