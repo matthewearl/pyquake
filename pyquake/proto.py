@@ -734,8 +734,10 @@ def read_demo_file(f):
     
     while True:
         d = f.read(demo_header_size)
-        if len(d) < demo_header_size:
+        if len(d) == 0:
             break
+        if len(d) < demo_header_size:
+            raise MalformedNetworkData
         msg_len, *view_angles = struct.unpack(demo_header_fmt, d)
         msg = _read(f, msg_len)
         while msg:
