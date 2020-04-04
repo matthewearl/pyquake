@@ -30,6 +30,7 @@ import glob
 import io
 import logging
 import os
+import pathlib
 import struct
 
 
@@ -77,20 +78,30 @@ class Filesystem(collections.abc.Mapping):
                 yield fname, _PakEntry(pak_file, offset, size)
                 i += 64
 
-    def __init__(self, pak_dir):
-        pak_files = sorted(glob.glob(os.path.join(pak_dir, "*.pak")))
+    def __init__(self, game_dir):
+        self._game_dir = pathlib.Path(game_dir).resolve()
+
+        pak_files = sorted(glob.glob(os.path.join(game_dir, "*.pak")))
         self._index = {fname: entry for pak_file in pak_files for fname, entry in self._generate_entries(pak_file)}
 
     def __getitem__(self, fname):
-        entry = self._index[fname]
-        with open(entry.pak_file, "rb") as f:
-            f.seek(entry.offset)
-            return self._read(f, entry.size)
+        if fname in self._index:
+            entry = self._index[fname]
+            with open(entry.pak_file, "rb") as f:
+                f.seek(entry.offset)
+                return self._read(f, entry.size)
+        else:
+            file_path = (self._game_dir / fname).resolve()
+            if self._game_dir not in file_path.parents:
+                raise Exception(f'File path is not in game dir {file_path}')
+            with file_path.open('rb') as f:
+                return f.read()
 
     def open(self, fname):
         return io.BytesIO(self[fname])
 
     def __iter__(self):
+        # TODO: This doesn't return files (directly) in the file system.  Maybe it should?
         return iter(self._index)
 
     def __len__(self):
