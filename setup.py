@@ -13,7 +13,7 @@ setup(name='Pyquake',
                 'aiopyqclient = pyquake.client:aioclient_main',
                 'aiodgram = pyquake.aiodgram:main',
                 'demo_parser = pyquake.proto:demo_parser_main',
-                'pyq_watch_demo = pyquake.demo:monitor_demo',
+                'pyq_monitor_demos = pyquake.demo:monitor_demos',
           ]
       },
       description='Python Quake client',

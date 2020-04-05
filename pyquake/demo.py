@@ -29,6 +29,7 @@ __all__ = (
 import contextlib
 import copy
 import hashlib
+import json
 import logging
 import os
 import pickle
@@ -221,9 +222,9 @@ class _DirMonitor:
         self.dname = dname
 
     def wait_for_event(self):
-        """Wait for an event matching the given mask, and then return the event"""
+        """Return an event from the queue"""
         while not self._unhandled_events:
-            self._unhandled_events.extend(self._ino.read(read_delay=100))
+            self._unhandled_events.extend(self._ino.read(read_delay=500))
         ev = self._unhandled_events.pop(0)
         logger.debug("Got event %s", ev)
         return ev
@@ -249,10 +250,54 @@ class _DirMonitor:
             wf.close()
 
 
-def monitor_demo():
+def _detect_first_movements():
+    moved_now = None
+    first_pos = None
+    moved_before = set()
+    while True:
+        pos = yield moved_now
+        if first_pos is None:
+            first_pos = pos
+        moved_now = set(np.where(np.any(pos != first_pos, axis=1))[0]) - moved_before
+        moved_before |= moved_now
+
+
+def _monitor_demo_file(f, checkpoint_info):
+    last_checkpoint_time = 0
+    checkpoints = None
+
+    move_detector = _detect_first_movements()
+    assert next(move_detector) is None
+
+    view_gen = ViewGen(f, fetch_model_positions=True)
+    for view_angles, pos, time in view_gen:
+        if view_gen.map_name and checkpoints is None:
+            if view_gen.map_name in checkpoint_info:
+                checkpoints = {model_num: name for name, model_num in checkpoint_info[view_gen.map_name].items()}
+            else:
+                logger.warning("No checkpoints found for map %s", view_gen.map_name)
+                checkpoints = {}
+
+        moved_now = move_detector.send(pos)
+        if moved_now:
+            logger.debug("Models %s moved at %s", moved_now, time)
+        if checkpoints is not None:
+            for model_num in moved_now:
+                if model_num in checkpoints:
+                    segment_time = time - last_checkpoint_time
+                    print(f"checkpoint: {checkpoints[model_num]:>20}  segment time: {segment_time:.2f}  "
+                          f"time: {time:.2f}")
+                    last_checkpoint_time = time
+    logger.info('Finished reading file')
+
+
+def monitor_demos():
     import sys
 
-    dname = sys.argv[1]
+    dname, checkpoint_info_fname = sys.argv[1:]
+
+    with open(checkpoint_info_fname) as f:
+        checkpoint_info = json.load(f)['maps']
 
     logging.basicConfig(level=logging.INFO)
 
@@ -264,10 +309,7 @@ def monitor_demo():
             while ev is None or not ev.mask & inotify_simple.flags.CREATE or not re.match(r'demo(\d)+\.dem', ev.name):
                 ev = dm.wait_for_event()
             name = ev.name
-            logger.info('File %s created. Opening.')
+            logger.info('File %s created. Opening.', name)
             with dm.open_file(name, 'rb') as f:
-                view_gen = ViewGen(f, fetch_model_positions=False)
-                for x in view_gen:
-                    print(view_gen.map_name, view_gen.complete, x)
-                logger.info('Finished reading file')
+                _monitor_demo_file(f, checkpoint_info)
 
