@@ -20,9 +20,9 @@ def _texture_to_arrays(pal, texture, light_tint=(1, 1, 1, 1)):
 
 
 def _load_images(pal, bsp, map_cfg):
-    ims = []
-    fullbright_ims = []
-    for texture_id, texture in enumerate(bsp.textures):
+    ims = {}
+    fullbright_ims = {}
+    for texture_id, texture in bsp.textures.items():
         tex_cfg = _get_texture_config(texture, map_cfg)
         array_im, fullbright_array_im, _ = _texture_to_arrays(pal, texture, tex_cfg['tint'])
         im = blendmat.im_from_array(texture.name, array_im)
@@ -32,8 +32,8 @@ def _load_images(pal, bsp, map_cfg):
         else:
             fullbright_im = None
 
-        ims.append(im)
-        fullbright_ims.append(fullbright_im)
+        ims[texture_id] = im
+        fullbright_ims[texture_id] = fullbright_im
 
     return ims, fullbright_ims
 
@@ -324,11 +324,11 @@ def add_bsp(bsp, pal, map_name, config):
     if map_cfg['do_materials']:
         ims, fullbright_ims = _load_images(pal, bsp, map_cfg)
 
-        for texture_id, texture in enumerate(bsp.textures):
+        for texture_id, texture in bsp.textures.items():
             _load_material(texture_id, texture, ims, fullbright_ims, map_cfg)
     
         if map_cfg['fullbright_object_overlay']:
-            for texture_id, texture in enumerate(bsp.textures):
+            for texture_id, texture in bsp.textures.items():
                 _load_fullbright_obj_material(texture_id, texture, ims, fullbright_ims, map_cfg)
 
     map_obj = bpy.data.objects.new(map_name, None)

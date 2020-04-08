@@ -352,8 +352,10 @@ class Bsp:
         f.seek(texture_dir_entry.offset)
         num_textures, = self._read_struct(f, "<L")
         logging.debug('Loading %s textures', num_textures)
-        tex_offsets = [self._read_struct(f, "<L")[0] for i in range(num_textures)]
-        return [self._read_texture(f, texture_dir_entry.offset + offs) for offs in tex_offsets]
+        tex_offsets = [self._read_struct(f, "<l")[0] for i in range(num_textures)]
+        return {idx: self._read_texture(f, texture_dir_entry.offset + offs)
+                for idx, offs in enumerate(tex_offsets)
+                if offs != -1}
 
     def __init__(self, f):
         version, = struct.unpack("<I", self._read(f, 4))

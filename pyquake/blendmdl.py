@@ -28,9 +28,7 @@ def _animate(am, blocks, obj, frames, fps=30):
     prev_block = None
     prev_time = None
     for time, frame_num in frames:
-        simple_frame = am.frames[frame_num].frame
-
-        block = blocks[simple_frame.name]
+        block = blocks[frame_num]
 
         block.value = 1.0
         block.keyframe_insert('value', frame=int(fps * time))
@@ -116,13 +114,11 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx=0, fps=30):
 
         # Create shape key blocks, used for animation.
         blocks = {}
-        for frame in am.frames:
+        for frame_num, frame in enumerate(am.frames):
             if frame.frame_type != mdl.FrameType.SINGLE:
                 raise Exception(f"Frame type {frame.frame_type} not supported")
             simple_frame = frame.frame
-            if simple_frame.name in blocks:
-                raise Exception("Duplicate frame name")
-            blocks[simple_frame.name] = _create_block(subobj, simple_frame, vert_map)
+            blocks[frame_num] = _create_block(subobj, simple_frame, vert_map)
         _animate(am, blocks, subobj, frames, fps)
 
         # Set up material
