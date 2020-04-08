@@ -28,6 +28,7 @@ __all__ = (
 
 import contextlib
 import copy
+import functools
 import hashlib
 import json
 import logging
@@ -36,6 +37,7 @@ import pickle
 import re
 import sys
 
+import colorama
 import numpy as np
 import scipy.interpolate
 import inotify_simple
@@ -226,7 +228,6 @@ class _DirMonitor:
         while not self._unhandled_events:
             self._unhandled_events.extend(self._ino.read(read_delay=500))
         ev = self._unhandled_events.pop(0)
-        logger.debug("Got event %s", ev)
         return ev
 
     def close(self):
@@ -262,7 +263,43 @@ def _detect_first_movements():
         moved_before |= moved_now
 
 
-def _monitor_demo_file(f, checkpoint_info):
+@functools.lru_cache(None)
+def _load_reference_checkpoints(demo_file_name, expected_map_name, checkpoints):
+    checkpoints = dict(checkpoints)
+    logger.info('Loading reference times from %s', demo_file_name)
+
+    move_detector = _detect_first_movements()
+    assert next(move_detector) is None
+
+    with open(demo_file_name, 'rb') as f:
+        view_gen = ViewGen(f, fetch_model_positions=True)
+        ref_times = {}
+        last_checkpoint_time = 0
+        for view_angles, pos, time in view_gen:
+            if view_gen.map_name is not None and view_gen.map_name != expected_map_name:
+                raise Exception(f"Reference demo is for map {view_gen.map_name}, not {expected_map_name}")
+            moved_now = move_detector.send(pos)
+            for model_num in moved_now:
+                if model_num in checkpoints:
+                    checkpoint_name = checkpoints[model_num]
+                    ref_times[checkpoint_name] = {'time': time, 'segment_time': time - last_checkpoint_time}
+                    last_checkpoint_time = time
+
+        logger.info('Loaded reference times (%s)', ref_times)
+    return ref_times
+
+
+def _format_time_delta(d):
+    if d > 0.1:
+        col = colorama.Fore.RED
+    elif d < -0.1:
+        col = colorama.Fore.GREEN
+    else:
+        col = colorama.Fore.WHITE
+    return f"{col}{colorama.Style.BRIGHT}{d:+.2f}{colorama.Style.RESET_ALL}"
+
+
+def _monitor_demo_file(f, demo_dir_name, checkpoint_info):
     last_checkpoint_time = 0
     checkpoints = None
 
@@ -271,12 +308,19 @@ def _monitor_demo_file(f, checkpoint_info):
 
     view_gen = ViewGen(f, fetch_model_positions=True)
     for view_angles, pos, time in view_gen:
-        if view_gen.map_name and checkpoints is None:
-            if view_gen.map_name in checkpoint_info:
-                checkpoints = {model_num: name for name, model_num in checkpoint_info[view_gen.map_name].items()}
+        map_name = view_gen.map_name
+        if map_name and checkpoints is None:
+            if map_name in checkpoint_info['checkpoints']:
+                checkpoints = {model_num: name for name, model_num in checkpoint_info['checkpoints'][map_name].items()}
             else:
                 logger.warning("No checkpoints found for map %s", view_gen.map_name)
                 checkpoints = {}
+
+            if map_name in checkpoint_info['refs']:
+                demo_file_name = os.path.join(demo_dir_name, checkpoint_info['refs'][map_name])
+                ref_times = _load_reference_checkpoints(demo_file_name, map_name, tuple(checkpoints.items()))
+            else:
+                ref_times = {}
 
         moved_now = move_detector.send(pos)
         if moved_now:
@@ -284,12 +328,25 @@ def _monitor_demo_file(f, checkpoint_info):
         if checkpoints is not None:
             for model_num in moved_now:
                 if model_num in checkpoints:
+                    checkpoint_name = checkpoints[model_num]
+                    if checkpoint_name not in ref_times:
+                        raise Exception(f"Checkpoint {checkpoint_name} not found in ref times: {ref_times}")
                     segment_time = time - last_checkpoint_time
-                    print(f"checkpoint: {checkpoints[model_num]:>20}  segment time: {segment_time:.2f}  "
-                          f"time: {time:.2f}")
+                    delta_time = time - ref_times[checkpoint_name]['time']
+                    delta_segment_time = segment_time - ref_times[checkpoint_name]['segment_time']
+                    print(f"checkpoint: {checkpoint_name:>20} "
+                          f"segment time: {segment_time:.2f} ({_format_time_delta(delta_segment_time)}) "
+                          f"time: {time:.2f} ({_format_time_delta(delta_time)})")
                     last_checkpoint_time = time
+
+    logger.debug('Waiting for underlying file to close')
+    while len(f.read(1 << 20)) == (1 << 20):
+        pass
+
     logger.info('Finished reading file')
 
+
+_DEMO_RE = r'(x|demo(\d)+)\.dem'
 
 def monitor_demos():
     import sys
@@ -297,7 +354,7 @@ def monitor_demos():
     dname, checkpoint_info_fname = sys.argv[1:]
 
     with open(checkpoint_info_fname) as f:
-        checkpoint_info = json.load(f)['maps']
+        checkpoint_info = json.load(f)
 
     logging.basicConfig(level=logging.INFO)
 
@@ -306,10 +363,12 @@ def monitor_demos():
         while True:
             logger.info("Waiting for file to be created")
             ev = None
-            while ev is None or not ev.mask & inotify_simple.flags.CREATE or not re.match(r'demo(\d)+\.dem', ev.name):
+            while (ev is None or
+                   not ev.mask & (inotify_simple.flags.CREATE | inotify_simple.flags.MODIFY) or
+                   not re.match(_DEMO_RE, ev.name)):
                 ev = dm.wait_for_event()
             name = ev.name
             logger.info('File %s created. Opening.', name)
             with dm.open_file(name, 'rb') as f:
-                _monitor_demo_file(f, checkpoint_info)
+                _monitor_demo_file(f, dname, checkpoint_info)
 

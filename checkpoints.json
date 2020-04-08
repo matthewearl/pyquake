@@ -1,5 +1,5 @@
 {
-    "maps": {
+    "checkpoints": {
         "maps/e1m1.bsp": {
 			"lift_button": 5,
 			"barrel_door": 6,
@@ -7,7 +7,19 @@
 			"spiral_button_1": 28,
 			"spiral_button_2": 26,
 			"spiral_button_3": 27
-		}
+		},
+        "maps/e1m2.bsp": {
+            "knight_door": 3,
+            "knight_button": 12,
+            "key_pickup": 50,
+            "key_door_open": 40,
+            "fiend_button": 18,
+            "exit_door": 34
+        }
+    },
+    "refs": {
+        "maps/e1m1.bsp": "demo5156.dem",
+        "maps/e1m2.bsp": "demo2938.dem"
     }
 }
 
