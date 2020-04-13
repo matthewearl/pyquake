@@ -18,8 +18,8 @@
         }
     },
     "refs": {
-        "maps/e1m1.bsp": "demo5156.dem",
-        "maps/e1m2.bsp": "demo2938.dem"
+        "maps/e1m1.bsp": "~/.quakespasm/id1/demo5156.dem",
+        "maps/e1m2.bsp": "~/.quakespasm/id1/demo2938.dem"
     }
 }
 

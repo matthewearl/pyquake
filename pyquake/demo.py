@@ -317,7 +317,7 @@ def _monitor_demo_file(f, demo_dir_name, checkpoint_info):
                 checkpoints = {}
 
             if map_name in checkpoint_info['refs']:
-                demo_file_name = os.path.join(demo_dir_name, checkpoint_info['refs'][map_name])
+                demo_file_name = os.path.expanduser(checkpoint_info['refs'][map_name])
                 ref_times = _load_reference_checkpoints(demo_file_name, map_name, tuple(checkpoints.items()))
             else:
                 ref_times = {}
