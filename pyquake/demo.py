@@ -38,11 +38,13 @@ import re
 import sys
 
 import colorama
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.interpolate
 import inotify_simple
 
 from . import proto
+from . import progress
 
 
 logger = logging.getLogger(__name__)
@@ -264,29 +266,35 @@ def _detect_first_movements():
 
 
 @functools.lru_cache(None)
-def _load_reference_checkpoints(demo_file_name, expected_map_name, checkpoints):
+def _load_reference_demo(demo_file_name, expected_map_name, checkpoints):
     checkpoints = dict(checkpoints)
     logger.info('Loading reference times from %s', demo_file_name)
 
     move_detector = _detect_first_movements()
     assert next(move_detector) is None
 
+    positions = []
+    times = []
+
     with open(demo_file_name, 'rb') as f:
         view_gen = ViewGen(f, fetch_model_positions=True)
-        ref_times = {}
+        ref_checkpoint_times = {}
         last_checkpoint_time = 0
         for view_angles, pos, time in view_gen:
+            positions.append(pos[0])
+            times.append(time)
             if view_gen.map_name is not None and view_gen.map_name != expected_map_name:
                 raise Exception(f"Reference demo is for map {view_gen.map_name}, not {expected_map_name}")
             moved_now = move_detector.send(pos)
             for model_num in moved_now:
                 if model_num in checkpoints:
                     checkpoint_name = checkpoints[model_num]
-                    ref_times[checkpoint_name] = {'time': time, 'segment_time': time - last_checkpoint_time}
+                    ref_checkpoint_times[checkpoint_name] = {'time': time, 'segment_time': time - last_checkpoint_time}
                     last_checkpoint_time = time
 
-        logger.info('Loaded reference times (%s)', ref_times)
-    return ref_times
+        logger.info('Loaded reference times (%s)', ref_checkpoint_times)
+
+    return ref_checkpoint_times, np.stack(times), np.stack(positions)
 
 
 def _format_time_delta(d):
@@ -299,7 +307,78 @@ def _format_time_delta(d):
     return f"{col}{colorama.Style.BRIGHT}{d:+.2f}{colorama.Style.RESET_ALL}"
 
 
-def _monitor_demo_file(f, demo_dir_name, checkpoint_info):
+class _ComparisonPlot:
+    def __init__(self, num_old_runs=5):
+        self._num_old_runs = num_old_runs
+
+        self._runs = []
+        self._fig, _ = plt.subplots()
+        self._fig.set_figwidth(12)
+        self._fig.set_figheight(12)
+        self._map_name = None
+        self._pm_cache = {}
+        self._pm = None
+        self._checkpoint_dists = {}
+        self._ref_dist_times = None
+
+    def update_plot(self):
+        ax, = self._fig.axes
+
+        ax.clear()
+        
+        if self._ref_dist_times is not None:
+            ax.grid(True)
+            ax.tick_params(axis='x', labelrotation=90)
+            ax.set_xticks(np.arange(0, len(self._ref_dist_times), 200))
+
+            ax.set_xlabel('distance')
+            ax.set_ylabel('time ahead of reference')
+
+            for i, r in enumerate(self._runs):
+                if i == len(self._runs) - 1:
+                    color = 'red'
+                    alpha = 1.0
+                else:
+                    color = 'gray'
+                    alpha = i / (len(self._runs)  - 1)
+                ax.plot(r, color=color, alpha=alpha)
+
+            for label, t in self._checkpoint_dists.items():
+                ax.axvline(t, alpha=0.5)
+                ax.text(t + 0.1, 0, label, rotation=90)
+
+        plt.show(block=False)
+        plt.pause(0.001)
+
+    def _distance_to_time(self, pm, times, origins):
+        _, dists = pm.get_progress(origins)
+        return np.interp(np.arange(dists[-1]), dists, times)
+
+    def set_ref(self, ref_checkpoint_times, ref_times, ref_origins, map_name):
+        if map_name != self._map_name:
+            # Changed map
+            self._runs = []
+            self._map_name = map_name
+
+        if id(ref_origins) not in self._pm_cache:
+            self._pm_cache[id(ref_origins)] = progress.ProgressMap(np.stack(ref_origins), 250)
+        self._pm = self._pm_cache[id(ref_origins)]
+
+        self._ref_dist_times = self._distance_to_time(self._pm, ref_times, ref_origins)
+
+        for label, d in ref_checkpoint_times.items():
+            t = d['time']
+            self._checkpoint_dists[label] = np.interp(t, self._ref_dist_times, np.arange(len(self._ref_dist_times)))
+
+    def add_run(self, times, origins):
+        dist_times = self._distance_to_time(self._pm, times, origins)
+        n = min(len(dist_times), len(self._ref_dist_times))
+        self._runs.append(dist_times[:n] - self._ref_dist_times[:n])
+        self._runs = self._runs[-self._num_old_runs:]
+        self.update_plot()
+
+
+def _monitor_demo_file(f, demo_dir_name, checkpoint_info, comparison_plot):
     last_checkpoint_time = 0
     checkpoints = None
 
@@ -307,7 +386,11 @@ def _monitor_demo_file(f, demo_dir_name, checkpoint_info):
     assert next(move_detector) is None
 
     view_gen = ViewGen(f, fetch_model_positions=True)
+    times = []
+    positions = []
     for view_angles, pos, time in view_gen:
+        times.append(time)
+        positions.append(pos[0])
         map_name = view_gen.map_name
         if map_name and checkpoints is None:
             if map_name in checkpoint_info['checkpoints']:
@@ -318,9 +401,11 @@ def _monitor_demo_file(f, demo_dir_name, checkpoint_info):
 
             if map_name in checkpoint_info['refs']:
                 demo_file_name = os.path.expanduser(checkpoint_info['refs'][map_name])
-                ref_times = _load_reference_checkpoints(demo_file_name, map_name, tuple(checkpoints.items()))
+                ref_checkpoint_times, ref_times, ref_origins = _load_reference_demo(demo_file_name, map_name,
+                                                                                    tuple(checkpoints.items()))
+                comparison_plot.set_ref(ref_checkpoint_times, ref_times, ref_origins, map_name)
             else:
-                ref_times = {}
+                ref_checkpoint_times, ref_times, ref_origins = {}, None, None
 
         moved_now = move_detector.send(pos)
         if moved_now:
@@ -329,15 +414,19 @@ def _monitor_demo_file(f, demo_dir_name, checkpoint_info):
             for model_num in moved_now:
                 if model_num in checkpoints:
                     checkpoint_name = checkpoints[model_num]
-                    if checkpoint_name not in ref_times:
-                        raise Exception(f"Checkpoint {checkpoint_name} not found in ref times: {ref_times}")
+                    if checkpoint_name not in ref_checkpoint_times:
+                        raise Exception(f"Checkpoint {checkpoint_name} not found in ref times: {ref_checkpoint_times}")
                     segment_time = time - last_checkpoint_time
-                    delta_time = time - ref_times[checkpoint_name]['time']
-                    delta_segment_time = segment_time - ref_times[checkpoint_name]['segment_time']
+                    delta_time = time - ref_checkpoint_times[checkpoint_name]['time']
+                    delta_segment_time = segment_time - ref_checkpoint_times[checkpoint_name]['segment_time']
                     print(f"checkpoint: {checkpoint_name:>20} "
                           f"segment time: {segment_time:.2f} ({_format_time_delta(delta_segment_time)}) "
                           f"time: {time:.2f} ({_format_time_delta(delta_time)})")
                     last_checkpoint_time = time
+
+    logger.debug('Plotting run')
+    if ref_times is not None:
+        comparison_plot.add_run(np.stack(times), np.stack(positions))
 
     logger.debug('Waiting for underlying file to close')
     while len(f.read(1 << 20)) == (1 << 20):
@@ -356,6 +445,9 @@ def monitor_demos():
     with open(checkpoint_info_fname) as f:
         checkpoint_info = json.load(f)
 
+    cp = _ComparisonPlot()
+    cp.update_plot()
+
     logging.basicConfig(level=logging.INFO)
 
     logger.info("Watching directory %s", dname)
@@ -370,5 +462,5 @@ def monitor_demos():
             name = ev.name
             logger.info('File %s created. Opening.', name)
             with dm.open_file(name, 'rb') as f:
-                _monitor_demo_file(f, dname, checkpoint_info)
+                _monitor_demo_file(f, dname, checkpoint_info, cp)
 

@@ -3,7 +3,6 @@
         "maps/e1m1.bsp": {
 			"lift_button": 5,
 			"barrel_door": 6,
-			"drawbridge_button": 10,
 			"spiral_button_1": 28,
 			"spiral_button_2": 26,
 			"spiral_button_3": 27
@@ -15,11 +14,14 @@
             "key_door_open": 40,
             "fiend_button": 18,
             "exit_door": 34
+        },
+        "maps/e2m1.bsp": {
         }
     },
     "refs": {
-        "maps/e1m1.bsp": "~/.quakespasm/id1/demo5156.dem",
-        "maps/e1m2.bsp": "~/.quakespasm/id1/demo2938.dem"
+        "maps/e1m1.bsp": "~/.quakespasm/id1/e1m1_all_1157.dem",
+        "maps/e1m2.bsp": "~/.quakespasm/id1/demo2938.dem",
+        "maps/e2m1.bsp": "~/.quakespasm/id1/demos_maxfps_36/demo0326.dem"
     }
 }
 
