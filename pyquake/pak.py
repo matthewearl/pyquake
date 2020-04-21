@@ -34,6 +34,7 @@ import pathlib
 import struct
 
 
+logger = logging.getLogger(__name__)
 _PakEntry = collections.namedtuple('_PakEntry', ('pak_file', 'offset', 'size'))
 
 
@@ -67,13 +68,13 @@ class Filesystem(collections.abc.Mapping):
 
     def _generate_entries(self, pak_file):
         with open(pak_file, "rb") as f:
-            logging.info("Reading %s", pak_file)
+            logger.info("Reading %s", pak_file)
             file_table_offset, file_table_size = self._read_header(f)
             f.seek(file_table_offset)
             i = 0
             while i < file_table_size:
                 fname = self._read_fname(f)
-                logging.debug("Indexed %s", fname)
+                logger.debug("Indexed %s", fname)
                 offset, size = struct.unpack("<II", self._read(f, 8))
                 yield fname, _PakEntry(pak_file, offset, size)
                 i += 64
@@ -111,9 +112,6 @@ class Filesystem(collections.abc.Mapping):
 if __name__ == "__main__":
     import sys
 
-    root_logger = logging.getLogger()
-    root_logger.addHandler(logging.StreamHandler())
-    root_logger.setLevel(logging.DEBUG)
-
+    logging.basicConfig(level=logging.DEBUG)
     fs = Filesystem(sys.argv[1])
 

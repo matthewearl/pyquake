@@ -35,6 +35,9 @@ from . import boxpack
 from . import demo
 
 
+logger = logging.getLogger(__name__)
+
+
 REFERENCE_RADIUS = 100
 SCREEN_SIZE = (1600, 1200)
 
@@ -74,7 +77,7 @@ def extract_lightmap_texture(bsp, face_idx):
 
 
 def make_full_lightmap(bsp, lightmap_size=(512, 512)):
-    logging.info("Making lightmap")
+    logger.info("Making lightmap")
     lightmaps = {face_idx: extract_lightmap_texture(bsp, face_idx)
                     for face_idx in range(len(bsp.faces))
                     if face_has_lightmap(bsp, face_idx)}
@@ -131,7 +134,7 @@ class Timer:
 
     def change_speed(self, inc):
         self.timescale *= 1.1 ** inc
-        logging.info("Timescale set to %.2f", self.timescale)
+        logger.info("Timescale set to %.2f", self.timescale)
 
 
 class Renderer:
@@ -406,14 +409,11 @@ class Renderer:
 def demo_viewer_main():
     import io
     import sys
-    import logging
 
     from .bsp import Bsp
     from . import pak
 
-    root_logger = logging.getLogger()
-    root_logger.addHandler(logging.StreamHandler())
-    root_logger.setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG)
 
     fs = pak.Filesystem(sys.argv[1])
 

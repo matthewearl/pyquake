@@ -279,7 +279,7 @@ class AsyncGuidedEnv(AsyncEnv):
             string = await print_queue.get()
             for k, v in self.center_print_rewards.items():
                 if k in string:
-                    logging.info("Center print reward: %r %s", k, v)
+                    logger.info("Center print reward: %r %s", k, v)
                     reward += v
                     self._center_prints_seen |= {k}
         return reward

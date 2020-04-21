@@ -237,7 +237,7 @@ class AsyncClient:
                         await self._conn.send_reliable(body)
                     elif parsed.num == 3:
                         await self._conn.send_reliable(_make_cmd_body("begin"))
-                        logging.info("Spawned")
+                        logger.info("Spawned")
                         self._spawned_fut.set_result(None)
                         self._spawned_fut = asyncio.Future()
 
@@ -269,9 +269,9 @@ class AsyncClient:
                         self._moved_fut[ent_num] = asyncio.Future()
 
                 if parsed.msg_type == proto.ServerMessageType.PRINT:
-                    logging.info("Print: %s", parsed.string)
+                    logger.info("Print: %s", parsed.string)
                 if parsed.msg_type == proto.ServerMessageType.CENTERPRINT:
-                    logging.info("Center print: %s", parsed.string)
+                    logger.info("Center print: %s", parsed.string)
                     await self.center_print_queue.put(parsed.string)
 
                 if parsed.msg_type == proto.ServerMessageType.TIME:
@@ -319,7 +319,7 @@ class AsyncClient:
 async def _monitor_movements(client):
     while True:
         origin = await client.wait_for_movement(client.view_entity)
-        logging.debug("Player moved to %s", origin)
+        logger.debug("Player moved to %s", origin)
 
 
 async def _perf_benchmark(client):
@@ -328,7 +328,7 @@ async def _perf_benchmark(client):
     for i in range(10000):
         client.move(0, 0, 0, 400, 0, 0, 0, 0)
         await client.wait_for_movement()
-    logging.info("Took %s seconds", time.perf_counter() - start)
+    logger.info("Took %s seconds", time.perf_counter() - start)
 
 
 async def _aioclient():
@@ -374,7 +374,7 @@ def aioclient_main():
 
 
 def client_main():
-    logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(level=logging.INFO)
 
     host, port = "localhost", 26000
 
