@@ -44,7 +44,7 @@ def _make_cmd_body(cmd):
 
 
 def _encode_angle(angle):
-    return int((angle * 128 / math.pi) % 256)
+    return int(round((angle * 128 / math.pi))) % 256
 
 
 def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse):
