@@ -47,10 +47,21 @@ def _encode_angle(angle):
     return int(round((angle * 128 / math.pi))) % 256
 
 
-def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse):
-    return struct.pack("<BfBBBhhhBB",
+def _encode_angle_16(angle):
+    return int(round((angle * 32768 / math.pi))) % 65536
+
+
+def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse, joequake_version=None):
+    if joequake_version is None:
+        fmt = "<BfBBBhhhBB"
+        encode_func = _encode_angle
+    else:
+        fmt = "<BfHHHhhhBB"
+        encode_func = _encode_angle_16
+
+    return struct.pack(fmt,
                        3, 0.,
-                       _encode_angle(pitch), _encode_angle(yaw), _encode_angle(roll),
+                       encode_func(pitch), encode_func(yaw), encode_func(roll),
                        forward, side, up, buttons, impulse)
 
 
@@ -293,13 +304,18 @@ class AsyncClient:
         await self._spawned_fut
 
     @classmethod
-    async def connect(cls, host, port):
+    async def connect(cls, host, port, joequake_version=None):
         """Connect to the given host and port, and start listening for messages.
 
         At the point this coroutine returns, no messages have yet been read.
 
         """
-        conn = await aiodgram.DatagramConnection.connect(host, port)
+        conn = await aiodgram.DatagramConnection.connect(host, port, joequake_version)
+
+        # Joequake server needs to receive before sending, as a NAT fix.
+        if conn.joequake_version is not None and conn.joequake_version >= 34:
+            await conn.send_reliable(b'\x01')
+
         client = cls(conn)
         asyncio.create_task(client._read_messages()).add_done_callback(
                 lambda fut: fut.result)
@@ -308,7 +324,8 @@ class AsyncClient:
     def move(self, pitch, yaw, roll, forward, side, up, buttons, impulse):
         self.angles = (pitch, yaw, roll)
         self._conn.send(_make_move_body(pitch, yaw, roll,
-                                        forward, side, up, buttons, impulse))
+                                        forward, side, up, buttons, impulse,
+                                        self.joequake_version))
 
     async def send_command(self, cmd):
         await self._conn.send_reliable(_make_cmd_body(cmd))
@@ -316,6 +333,10 @@ class AsyncClient:
     async def disconnect(self):
         self._conn.disconnect()
         await self._conn.wait_until_disconnected()
+
+    @property
+    def joequake_version(self):
+        return self._conn.joequake_version
 
 
 async def _monitor_movements(client):

@@ -20,7 +20,6 @@
 
 
 import asyncio
-import collections
 import enum
 import logging
 import socket
@@ -43,7 +42,7 @@ class _NetFlags(enum.IntFlag):
 
 
 _SUPPORTED_FLAG_COMBINATIONS = (
-    #_NetFlags.DATA,    # Should work but I don't think it's been seen in the wild
+    _NetFlags.DATA,    # Should work but I don't think it's been seen in the wild
     _NetFlags.DATA | _NetFlags.EOM,
     _NetFlags.UNRELIABLE,
     _NetFlags.ACK,
@@ -100,6 +99,8 @@ class DatagramConnection:
 
         self._unreliable_send_seq = 0
 
+        self.joequake_version = None
+
     async def _monitor_queues(self):
         while True:
             await asyncio.sleep(1)
@@ -107,8 +108,15 @@ class DatagramConnection:
                           self._send_reliable_queue.qsize(),
                           self._send_reliable_ack_queue.qsize(),
                           self._message_queue.qsize())
-                         
-    async def _connect(self, host, port):
+
+    def _make_connection_request_body(self, joequake_version):
+        if joequake_version is None:
+            return b'\x01QUAKE\x00\x03'
+        else:
+            return (b'\x01QUAKE\x00\x03\x01' +
+                    bytes([joequake_version, 0, 0, 0, 0, 0]))
+
+    async def _connect(self, host, port, desired_joequake_version=None):
         host = socket.gethostbyname(host)
 
         await self._udp.wait_until_connected()
@@ -117,7 +125,7 @@ class DatagramConnection:
         response_received = False
         while not response_received:
             logger.info("Sending connection request...")
-            body = b'\x01QUAKE\x00\x03'
+            body = self._make_connection_request_body(desired_joequake_version)
             header_fmt = ">HH"
             header_size = struct.calcsize(header_fmt)
             header = struct.pack(header_fmt, _NetFlags.CTL, len(body) + header_size)
@@ -142,10 +150,22 @@ class DatagramConnection:
         # All going well, the body should contain a new port to communicate with.
         if body[0] != 0x81:
             raise DatagramError(f"Expected CCREP_ACCEPT message, not {body[0]}")
-        if len(body) != 5:
-            raise DatagramError(f"Unexpected packet length {len(body)}")
-        self._port, = struct.unpack("<L", body[1:])
+        self._port, = struct.unpack("<L", body[1:5])
         self._host = host
+
+        if len(body) > 5:
+            mod_version = body[6] if len(body) > 6 else 0
+            mod_flags = body[7] if len(body) > 7 else 0
+            logger.info("Server mod: 0x%x, version: 0x%x, flags: 0x%x",
+                        body[5], mod_version, mod_flags)
+            if (desired_joequake_version is not None and 
+                    mod_version != desired_joequake_version):
+                raise DatagramError("Server JoeQuake version doesn't match "
+                                    "desired version")
+        elif desired_joequake_version is not None:
+            raise DatagramError("Server does not support JoeQuake protocol")
+        self.joequake_version = desired_joequake_version
+
         logger.info("Connected")
 
         # Spin up required tasks.
@@ -155,14 +175,14 @@ class DatagramConnection:
             asyncio.create_task(self._monitor_queues()))
 
     @classmethod
-    async def connect(cls, host, port):
+    async def connect(cls, host, port, joequake_version=None):
         loop = asyncio.get_running_loop()
         transport, protocol = await loop.create_datagram_endpoint(
                 lambda: _GenericUdpProtocol(loop),
                 family=socket.AF_INET)
 
         conn = cls(protocol)
-        await conn._connect(host, port)
+        await conn._connect(host, port, joequake_version)
         return conn
 
     async def wait_until_disconnected(self):
@@ -243,11 +263,11 @@ class DatagramConnection:
             netflags, size, seq_num = struct.unpack(header_fmt, packet[:header_size])
             netflags = _NetFlags(netflags)
             body = packet[header_size:]
-            logger.debug("Received packet: %s %s %s", netflags, seq_num, body)
+            logger.info("Received packet: %s %s %s", netflags, seq_num, body)
 
             if len(packet) != size:
                 raise DatagramError(f"Packet size {len(packet)} does not "
-                                     "match header {size}")
+                                    f"match header {size}")
 
             if netflags not in _SUPPORTED_FLAG_COMBINATIONS:
                 raise DatagramError(f"Unsupported flag combination: {netflags}")
@@ -258,7 +278,7 @@ class DatagramConnection:
                 else:
                     if seq_num != unreliable_recv_seq:
                         logger.warning("Skipped %s unreliable messages",
-                                        self._unreliable_recv_seq - seq_num)
+                                       self._unreliable_recv_seq - seq_num)
                     unreliable_recv_seq = seq_num + 1
                     await self._message_queue.put(body)
             elif _NetFlags.ACK in netflags:
