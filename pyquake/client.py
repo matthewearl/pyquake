@@ -195,6 +195,7 @@ class AsyncClient:
         self._moved_fut = collections.defaultdict(asyncio.Future)
         self.center_print_queue = asyncio.Queue()
         self.origins = {}
+        self.baselines = {}
         self.angles = (0., 0., 0.)
         self.velocity = (0., 0., 0.)
 
@@ -257,12 +258,13 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
                     if self.view_entity is None:
                         raise ClientError("View entity not set but spawnbaseline received")
+                    self.baselines[parsed.entity_num] = parsed.origin
                     self.origins[parsed.entity_num] = parsed.origin
                 if parsed.msg_type == proto.ServerMessageType.UPDATE:
                     ent_num = parsed.entity_num
                     if ent_num in self.origins:
                         self.origins[ent_num] = _patch_vec(
-                                self.origins[ent_num], parsed.origin)
+                                self.baselines[ent_num], parsed.origin)
 
                         if parsed.entity_num in self._moved_fut:
                             self._moved_fut[ent_num].set_result(self.origins[ent_num])
