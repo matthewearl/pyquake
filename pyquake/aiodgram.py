@@ -263,7 +263,7 @@ class DatagramConnection:
             netflags, size, seq_num = struct.unpack(header_fmt, packet[:header_size])
             netflags = _NetFlags(netflags)
             body = packet[header_size:]
-            logger.info("Received packet: %s %s %s", netflags, seq_num, body)
+            logger.debug("Received packet: %s %s %s", netflags, seq_num, body)
 
             if len(packet) != size:
                 raise DatagramError(f"Packet size {len(packet)} does not "
