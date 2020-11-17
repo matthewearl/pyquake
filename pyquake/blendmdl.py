@@ -61,7 +61,7 @@ def _animate(am, blocks, obj, frames, fps=30):
         prev_block = block
         prev_time = time
 
-    for c in obj.data.animation_data.action.fcurves:
+    for c in obj.data.shape_keys.animation_data.action.fcurves:
         for kfp in c.keyframe_points:
             kfp.interpolation = 'LINEAR'
 

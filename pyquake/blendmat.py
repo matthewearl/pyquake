@@ -36,7 +36,7 @@ import numpy as np
 def im_from_array(name, array_im):
     im = bpy.data.images.new(name, width=array_im.shape[1], height=array_im.shape[0])
     im.pixels = np.ravel(array_im)
-    im.pack(as_png=True)
+    im.pack()
     return im
 
 
