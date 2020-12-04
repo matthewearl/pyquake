@@ -223,3 +223,5 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo', load_level=Tr
     if load_level:
         level_animator.done()
     am_animator.done()
+
+    return world_obj
