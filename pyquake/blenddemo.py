@@ -78,6 +78,8 @@ class AliasModelAnimator:
         self._pal = pal
         self._fps = fps
 
+        self.entity_objs = {}
+
     def handle_parsed(self, view_angles, parsed, time):
         if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
             self._model_paths = parsed.models
@@ -126,6 +128,8 @@ class AliasModelAnimator:
                                     [fr.skin_idx for fr in ame.path][-1],
                                     fps=self._fps)
             bm.obj.parent = self._world_obj
+
+            self.entity_objs[entity_num] = bm.obj
 
             for fr in ame.path:
                 if fr.time is not None:
@@ -203,7 +207,8 @@ class LevelAnimator:
         pass
 
 
-def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo', load_level=True):
+def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
+             load_level=True, relative_time=False):
     pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
     world_obj = bpy.data.objects.new(world_obj_name, None)
     bpy.context.scene.collection.objects.link(world_obj)
@@ -213,9 +218,15 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo', load_level=Tr
     am_animator = AliasModelAnimator(world_obj, fs, pal, fps)
 
     time = None
+    first_time = None
     for view_angles, parsed in proto.read_demo_file(demo_file):
         if parsed.msg_type == proto.ServerMessageType.TIME:
-            time = parsed.time
+            if first_time is None:
+                first_time = parsed.time
+            if relative_time:
+                time = parsed.time - first_time
+            else:
+                time = parsed.time
         if load_level:
             level_animator.handle_parsed(view_angles, parsed, time)
         am_animator.handle_parsed(view_angles, parsed, time)
@@ -224,4 +235,4 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo', load_level=Tr
         level_animator.done()
     am_animator.done()
 
-    return world_obj
+    return world_obj, am_animator.entity_objs
