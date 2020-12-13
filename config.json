@@ -13,6 +13,46 @@
                 "asph3": {
                     "strength": 50,
                     "sample_as_light": true
+                },
+                "recort41": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort42": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort43": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort44": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort45": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort46": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort47": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort48": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort2": {
+                    "strength": 0,
+                    "sample_as_light": false
+                },
+                "recort3": {
+                    "strength": 0,
+                    "sample_as_light": false
                 }
             }
         },
