@@ -134,9 +134,10 @@ class AliasModelAnimator:
             for fr in ame.path:
                 if fr.time is not None:
                     bm.obj.location = fr.origin
-                    bm.obj.keyframe_insert('location', frame=int(self._fps * fr.time))
+                    blender_frame = int(round(self._fps * fr.time))
+                    bm.obj.keyframe_insert('location', frame=blender_frame)
                     bm.obj.rotation_euler = (0., 0., fr.angles[1])  # ¯\_(ツ)_/¯
-                    bm.obj.keyframe_insert('rotation_euler', frame=int(self._fps * fr.time))
+                    bm.obj.keyframe_insert('rotation_euler', frame=blender_frame)
 
 
 class LevelAnimator:

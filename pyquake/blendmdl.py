@@ -51,12 +51,12 @@ def _animate(am, blocks, obj, frames, fps=30):
         block = blocks[frame_num]
 
         block.value = 1.0
-        block.keyframe_insert('value', frame=int(fps * time))
+        block.keyframe_insert('value', frame=int(round(fps * time)))
         if prev_block:
             block.value = 0.0
-            block.keyframe_insert('value', frame=int(fps * prev_time))
+            block.keyframe_insert('value', frame=int(round(fps * prev_time)))
             prev_block.value = 0.0
-            prev_block.keyframe_insert('value', frame=int(fps * time))
+            prev_block.keyframe_insert('value', frame=int(round(fps * time)))
 
         prev_block = block
         prev_time = time
