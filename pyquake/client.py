@@ -209,6 +209,7 @@ class AsyncClient:
         self.baselines = {}
         self.angles = (0., 0., 0.)
         self.velocity = (0., 0., 0.)
+        self.on_ground = None
 
         self._demos = []
 
@@ -261,9 +262,10 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.SETANGLE:
                     self.angles = parsed.view_angles
 
-                # Set velocity
+                # Set velocity and on_ground
                 if parsed.msg_type == proto.ServerMessageType.CLIENTDATA:
                     self.velocity = parsed.m_velocity
+                    self.on_ground = parsed.on_ground
 
                 # Update entity positions
                 if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
