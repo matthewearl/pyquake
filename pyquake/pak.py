@@ -52,10 +52,10 @@ class Filesystem(collections.abc.Mapping):
         return b
 
     def _read_fname(self, f):
-        fname = self._read(f, 56).decode('ascii')
-        if '\0' in fname:
-            fname = fname[:fname.index('\0')]
-        return fname
+        fname = self._read(f, 56)
+        if b'\0' in fname:
+            fname = fname[:fname.index(b'\0')]
+        return fname.decode('ascii')
 
     def _read_header(self, f):
         try:
