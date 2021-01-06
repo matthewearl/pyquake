@@ -9,6 +9,60 @@
                     "sample_as_light": false,
                     "tint": [1, 1, 1, 1],
                     "overlay": true
+                },
+                "asph3": {
+                    "strength": 50,
+                    "sample_as_light": true
+                },
+                "recort41": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort42": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort43": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort44": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort45": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort46": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort47": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort48": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort2": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
+                },
+                "recort3": {
+                    "strength": 0,
+                    "sample_as_light": false,
+                    "overlay": false
                 }
             }
         },
