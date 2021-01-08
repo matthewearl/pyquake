@@ -709,6 +709,17 @@ class ServerMessageIntermission(NoFieldsServerMessage):
 
 
 @_register_server_message
+class ServerMessageFinale(ServerMessage):
+    field_names = ('string',)
+    msg_type = ServerMessageType.FINALE
+
+    @classmethod
+    def parse(cls, m):
+        s, m = cls._parse_string(m)
+        return cls(s), m
+
+
+@_register_server_message
 class ServerMessageDisconnect(NoFieldsServerMessage):
     msg_type = ServerMessageType.DISCONNECT
 
