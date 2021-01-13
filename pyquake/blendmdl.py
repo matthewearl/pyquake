@@ -61,9 +61,10 @@ def _animate(am, blocks, obj, frames, fps=30):
         prev_block = block
         prev_time = time
 
-    for c in obj.data.shape_keys.animation_data.action.fcurves:
-        for kfp in c.keyframe_points:
-            kfp.interpolation = 'LINEAR'
+    if len(frames):
+        for c in obj.data.shape_keys.animation_data.action.fcurves:
+            for kfp in c.keyframe_points:
+                kfp.interpolation = 'LINEAR'
 
 
 def _set_uvs(mesh, am, tri_set):
