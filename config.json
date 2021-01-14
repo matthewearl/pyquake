@@ -121,6 +121,26 @@
                 }
             }
         },
+        "e1m6": {
+            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "key03_02": {
+                    "strength": 200,
+                    "sample_as_light": false
+                },
+                "*lava1": {
+                    "strength": 500,
+                    "sample_as_light": false
+                }
+            }
+        },
         "e2m1": {
             "do_materials": true,
             "fullbright_object_overlay": true,

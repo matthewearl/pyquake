@@ -74,15 +74,33 @@ class AliasModelAnimator:
         self._world_obj = world_obj
         self._model_paths = None
         self._entities = {}
+        self._static_entities = []
         self._fs = fs
         self._pal = pal
         self._fps = fps
+        self._final_time = None
 
         self.entity_objs = {}
+        self.static_entity_objs = {}
 
     def handle_parsed(self, view_angles, parsed, time):
         if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
             self._model_paths = parsed.models
+
+        if parsed.msg_type == proto.ServerMessageType.SPAWNSTATIC:
+            model_path = self._model_paths[parsed.model_num - 1]
+            if model_path.endswith('.mdl'):
+                current_frame = AliasModelEntityFrame(
+                    time=time,
+                    origin=parsed.origin,
+                    angles=parsed.angles,
+                    frame=parsed.frame,
+                    skin_idx=parsed.skin,
+                )
+                self._static_entities.append(AliasModelEntity(
+                    model_path=model_path,
+                    path=[current_frame],
+                ))
 
         if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
             model_path = self._model_paths[parsed.model_num - 1]
@@ -104,6 +122,8 @@ class AliasModelAnimator:
                 ame = self._entities[parsed.entity_num]
                 ame.path.append(ame.path[-1].update(time, parsed.origin, parsed.angle, parsed.frame, parsed.skin))
 
+        self._final_time = time
+
     def _path_to_model_name(self, mdl_path):
         m = re.match(r"progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
         if m is None:
@@ -116,7 +136,6 @@ class AliasModelAnimator:
 
         logger.info("Creating models in blender")
         for entity_num, ame in self._entities.items():
-
             frames = [(fr.time, fr.frame) for fr in ame.path if fr.time is not None]
             frames = [frames[i] for i in range(len(frames)) if i == 0 or frames[i][1] != frames[i - 1][1]]
 
@@ -126,6 +145,8 @@ class AliasModelAnimator:
                                     f"ent{entity_num}",
                                     frames,
                                     [fr.skin_idx for fr in ame.path][-1],
+                                    self._final_time,
+                                    static=False,
                                     fps=self._fps)
             bm.obj.parent = self._world_obj
 
@@ -138,6 +159,25 @@ class AliasModelAnimator:
                     bm.obj.keyframe_insert('location', frame=blender_frame)
                     bm.obj.rotation_euler = (0., 0., fr.angles[1])  # ¯\_(ツ)_/¯
                     bm.obj.keyframe_insert('rotation_euler', frame=blender_frame)
+
+        for idx, ame in enumerate(self._static_entities):
+            assert len(ame.path) == 1
+            frame, = ame.path
+            print(frame)
+            print(ame.model_path)
+            bm = blendmdl.add_model(alias_models[ame.model_path],
+                                    self._pal,
+                                    self._path_to_model_name(ame.model_path),
+                                    f"static{idx}",
+                                    [(frame.time, frame.frame)],
+                                    [fr.skin_idx for fr in ame.path][-1],
+                                    self._final_time,
+                                    static=True,
+                                    fps=self._fps)
+            bm.obj.parent = self._world_obj
+            self.static_entity_objs[idx] = bm.obj
+
+            bm.obj.location = frame.origin
 
 
 class LevelAnimator:
@@ -201,8 +241,8 @@ class LevelAnimator:
                 self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
                 self._demo_cam_obj.keyframe_insert('rotation_euler', frame=frame)
 
-                self._bb.hide_invisible_fullbright_objects(view_origin)
-                self._bb.insert_fullbright_object_visibility_keyframe(frame)
+                #self._bb.hide_invisible_fullbright_objects(view_origin)
+                #self._bb.insert_fullbright_object_visibility_keyframe(frame)
 
     def done(self):
         pass

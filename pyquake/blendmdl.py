@@ -19,6 +19,7 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import io
+import itertools
 from dataclasses import dataclass
 from typing import Dict, Any
 
@@ -61,7 +62,7 @@ def _animate(am, blocks, obj, frames, fps=30):
         prev_block = block
         prev_time = time
 
-    if len(frames):
+    if prev_time is not None:
         for c in obj.data.shape_keys.animation_data.action.fcurves:
             for kfp in c.keyframe_points:
                 kfp.interpolation = 'LINEAR'
@@ -115,7 +116,7 @@ def load_model(pak_root, mdl_name, obj_name, frames, skin_idx=0, fps=30):
     add_model(am, pal, mdl_name, obj_name, frames, skin_idx, fps)
 
 
-def add_model(am, pal, mdl_name, obj_name, frames, skin_idx=0, fps=30):
+def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, static=False, fps=30):
     frames = list(frames)
 
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
@@ -126,7 +127,11 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx=0, fps=30):
         # Create the mesh and object
         subobj_name = f"{obj_name}_triset{tri_set_idx}"
         mesh = bpy.data.meshes.new(subobj_name)
-        pydata, vert_map = _simplify_pydata([list(v) for v in am.frames[0].frame.frame_verts],
+        if am.frames[0].frame_type == mdl.FrameType.SINGLE:
+            initial_verts = am.frames[0].frame.frame_verts
+        else:
+            initial_verts = am.frames[0].frames[0].frame_verts
+        pydata, vert_map = _simplify_pydata([list(v) for v in initial_verts],
                                             [list(am.tris[t]) for t in tri_set])
         mesh.from_pydata(*pydata)
         subobj = bpy.data.objects.new(subobj_name, mesh)
@@ -135,12 +140,32 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx=0, fps=30):
 
         # Create shape key blocks, used for animation.
         blocks = {}
-        for frame_num, frame in enumerate(am.frames):
-            if frame.frame_type != mdl.FrameType.SINGLE:
-                raise Exception(f"Frame type {frame.frame_type} not supported")
-            simple_frame = frame.frame
-            blocks[frame_num] = _create_block(subobj, simple_frame, vert_map)
-        _animate(am, blocks, subobj, frames, fps)
+        if not static:
+            for frame_num, frame in enumerate(am.frames):
+                if frame.frame_type != mdl.FrameType.SINGLE:
+                    raise Exception(f"Frame type {frame.frame_type} not supported for non-static models")
+                blocks[frame_num] = _create_block(subobj, frame.frame, vert_map)
+            _animate(am, blocks, subobj, frames, fps)
+        else:
+            if len(frames) != 1:
+                raise Exception(f"Static model must have exactly one frame, not {len(frames)}")
+            group_frame = am.frames[frames[0][1]]
+            if group_frame.frame_type != mdl.FrameType.GROUP:
+                raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
+            for frame_num, simple_frame in enumerate(group_frame.frames):
+                blocks[frame_num] = _create_block(subobj, simple_frame, vert_map)
+
+            # Setup the group frame to loop indefinitely
+            num_loops = int(np.ceil(final_time / group_frame.times[-1]))
+            times = np.empty((num_loops, len(group_frame.frames)))
+            times[:, 0] = 0
+            times[:, 1:] = group_frame.times[None, :-1]
+            times[:, :] += np.arange(num_loops)[:, None] * group_frame.times[-1]
+            times = np.ravel(times)
+
+            loop_frames = zip(times, itertools.cycle(range(len(group_frame.frames))))
+
+            _animate(am, blocks, subobj, loop_frames, fps)
 
         # Set up material
         fullbright_frac = _get_tri_set_fullbright_frac(am, tri_set, skin_idx)
