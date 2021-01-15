@@ -21,7 +21,7 @@
 import io
 import itertools
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Set
 
 import bmesh
 import bpy
@@ -43,6 +43,7 @@ class BlendMdl:
     am: "AliasMdl"
     blocks: Dict
     obj: bpy_types.Object
+    sample_as_light_mats: Set[bpy.types.Material]
 
 
 def _animate(am, blocks, obj, frames, fps=30):
@@ -121,6 +122,7 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, static=
 
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
+    sample_as_light_mats = set()
     obj = bpy.data.objects.new(obj_name, None)
     bpy.context.scene.collection.objects.link(obj)
     for tri_set_idx, tri_set in enumerate(am.disjoint_tri_sets):
@@ -172,7 +174,7 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, static=
         sample_as_light = fullbright_frac > 0.8
         mat_name = f"{mdl_name}_skin{skin_idx}"
         if sample_as_light:
-            mat_name = f"{mat_name}_fullbright"
+            mat_name = f"{mat_name}_{obj_name}_triset{tri_set_idx}_fullbright"
         if mat_name not in bpy.data.materials:
             mat, nodes, links = blendmat.new_mat(mat_name)
             array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(pal, am.skins[skin_idx])
@@ -184,11 +186,13 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, static=
             else:
                 blendmat.setup_diffuse_material(nodes, links, im)
             mat.cycles.sample_as_light = sample_as_light
+            if sample_as_light:
+                sample_as_light_mats.add(mat)
         mat = bpy.data.materials[mat_name]
 
         # Apply the material
         mesh.materials.append(mat)
         _set_uvs(mesh, am, tri_set)
 
-    return BlendMdl(am, blocks, obj)
+    return BlendMdl(am, blocks, obj, sample_as_light_mats)
 

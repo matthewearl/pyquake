@@ -19,6 +19,7 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
+import functools
 import logging
 import math
 import re
@@ -82,6 +83,7 @@ class AliasModelAnimator:
 
         self.entity_objs = {}
         self.static_entity_objs = {}
+        self.static_mats = []
 
     def handle_parsed(self, view_angles, parsed, time):
         if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
@@ -163,8 +165,6 @@ class AliasModelAnimator:
         for idx, ame in enumerate(self._static_entities):
             assert len(ame.path) == 1
             frame, = ame.path
-            print(frame)
-            print(ame.model_path)
             bm = blendmdl.add_model(alias_models[ame.model_path],
                                     self._pal,
                                     self._path_to_model_name(ame.model_path),
@@ -178,6 +178,8 @@ class AliasModelAnimator:
             self.static_entity_objs[idx] = bm.obj
 
             bm.obj.location = frame.origin
+            if bm.sample_as_light_mats:
+                self.static_mats.append((frame.origin, bm.sample_as_light_mats))
 
 
 class LevelAnimator:
@@ -193,6 +195,7 @@ class LevelAnimator:
         self._entity_origins = {}
         self._entity_to_model = {}
         self._bb = None
+        self._view_path = []
 
         demo_cam = bpy.data.cameras.new(name="demo_cam")
         demo_cam.lens = 18.0
@@ -236,6 +239,7 @@ class LevelAnimator:
             if parsed.entity_num == self._view_entity:
                 self._view_origin = _patch_vec(self._view_origin, parsed.origin)
                 view_origin = self._view_origin[:2] + (self._view_origin[2] + 22,)
+                self._view_path.append((time, view_origin))
                 self._demo_cam_obj.location = view_origin
                 self._demo_cam_obj.keyframe_insert('location', frame=frame)
                 self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
@@ -244,8 +248,20 @@ class LevelAnimator:
                 self._bb.set_visible_sample_as_light(view_origin, bounces=2)
                 self._bb.insert_sample_as_light_visibility_keyframe(frame)
 
-    def done(self):
-        pass
+    def done(self, am_animator: AliasModelAnimator):
+        @functools.lru_cache(None)
+        def leaf_from_pos(pos):
+            return self._bb.bsp.models[0].get_leaf_from_point(pos)
+
+        static_mats = am_animator.static_mats
+        for time, view_origin in self._view_path:
+            blender_frame = int(round(self._fps * time))
+            vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=1)
+            for pos, mats in static_mats:
+                is_vis = leaf_from_pos(pos) in vis_leaves
+                for mat in mats:
+                    mat.cycles.sample_as_light = is_vis
+                    mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
 
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
@@ -272,8 +288,8 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
             level_animator.handle_parsed(view_angles, parsed, time)
         am_animator.handle_parsed(view_angles, parsed, time)
 
-    if load_level:
-        level_animator.done()
     am_animator.done()
+    if load_level:
+        level_animator.done(am_animator)
 
     return world_obj, am_animator.entity_objs
