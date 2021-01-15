@@ -149,6 +149,17 @@ class Leaf(NamedTuple):
     def visible_faces(self):
         return (face for leaf in self.visible_leaves for face in leaf.faces)
 
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.leaves.index(self)
+
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+
 
 class Face(NamedTuple):
     bsp: "Bsp"
@@ -223,6 +234,10 @@ class Face(NamedTuple):
     def centroid(self):
         return np.array(list(self.vertices)).mean(axis=0)
 
+    @property
+    def leaf(self):
+        return self.bsp._face_to_leaf[self]
+
 
 class TexInfo(NamedTuple):
     bsp: "Bsp"
@@ -293,6 +308,9 @@ class Texture(NamedTuple):
     def __hash__(self):
         return hash(id(self))
 
+    def __eq__(self, other):
+        return id(self) == id(other)
+
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
 
@@ -303,6 +321,12 @@ class MalformedBspFile(Exception):
 
 class Bsp:
     """A BSP file parser, and interface to the information directly contained within."""
+
+    @property
+    @functools.lru_cache(None)
+    def _face_to_leaf(self):
+        return {face: leaf for leaf in self.leaves for face in leaf.faces}
+
     def _read(self, f, n):
         b = f.read(n)
         if len(b) < n:
