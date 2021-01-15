@@ -241,7 +241,7 @@ class LevelAnimator:
                 self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
                 self._demo_cam_obj.keyframe_insert('rotation_euler', frame=frame)
 
-                self._bb.set_visible_sample_as_light(view_origin)
+                self._bb.set_visible_sample_as_light(view_origin, bounces=2)
                 self._bb.insert_sample_as_light_visibility_keyframe(frame)
 
     def done(self):
