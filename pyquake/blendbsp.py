@@ -29,7 +29,7 @@ import bpy_types
 import bmesh
 import numpy as np
 
-from .bsp import Bsp, Face, Leaf
+from .bsp import Bsp, Face, Leaf, Model
 from . import pak, blendmat
 
 
@@ -70,7 +70,7 @@ class _MaterialApplier:
     def __init__(self, pal, map_cfg):
         self._pal = pal
         self._map_cfg = map_cfg
-        self.leaf_to_mats = collections.defaultdict(set)
+        self.leaf_to_mats = collections.defaultdict(lambda: collections.defaultdict(set))
 
     @functools.lru_cache(None)
     def _load_image(self, texture):
@@ -162,7 +162,7 @@ class _MaterialApplier:
             if self._get_sample_as_light(texture, mat_type):
                 # Use a different material for each leaf
                 mat = self._get_material(mat_type, texture, bsp_face.leaf)
-                self.leaf_to_mats[bsp_face.leaf].add(mat)
+                self.leaf_to_mats[model][bsp_face.leaf].add(mat)
             else:
                 # Single material
                 mat = self._get_material(mat_type, texture, None)
@@ -354,7 +354,7 @@ class BlendBsp(NamedTuple):
     map_obj: bpy_types.Object
     model_objs: Dict[int, bpy_types.Object]
     fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
-    leaf_to_mats: Optional[Dict[Leaf, Set[bpy.types.Material]]]
+    leaf_to_mats: Optional[Dict[Model, Dict[Leaf, Set[bpy.types.Material]]]]
 
     def _get_visible_leaves(self, pos, bounces):
         visible_leaves = {self.bsp.models[0].get_leaf_from_point(pos)}
@@ -363,23 +363,27 @@ class BlendBsp(NamedTuple):
         return visible_leaves
 
     def set_visible_sample_as_light(self, pos, *, bounces=1):
+        leaf_to_mats = self.leaf_to_mats[self.bsp.models[0]]
+
         all_sample_as_light_mats = {
             m
-            for mats in self.leaf_to_mats.values()
+            for mats in leaf_to_mats.values()
             for m in mats
         }
         visible_sample_as_light_mats = {
             m
             for l in self._get_visible_leaves(pos, bounces)
-            for m in self.leaf_to_mats.get(l, ())
+            for m in leaf_to_mats.get(l, ())
         }
         for mat in all_sample_as_light_mats:
             mat.cycles.sample_as_light = mat in visible_sample_as_light_mats
 
     def insert_sample_as_light_visibility_keyframe(self, frame):
+        leaf_to_mats = self.leaf_to_mats[self.bsp.models[0]]
+
         all_sample_as_light_mats = {
             m
-            for mats in self.leaf_to_mats.values()
+            for mats in leaf_to_mats.values()
             for m in mats
         }
         for mat in all_sample_as_light_mats:
@@ -442,7 +446,7 @@ def add_bsp(bsp, pal, map_name, config):
         fullbright_objects.update(model_fullbright_objects)
 
     if mat_applier is not None:
-        leaf_to_mats = dict(mat_applier.leaf_to_mats)
+        leaf_to_mats = mat_applier.leaf_to_mats
     else:
         leaf_to_mats = None
 

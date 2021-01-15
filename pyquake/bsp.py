@@ -298,6 +298,12 @@ class Model(NamedTuple):
         sx = simplex.Simplex.from_bbox(bbox.mins, bbox.maxs)
         return n.get_leaves_from_simplex(sx)
 
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+
 
 class Texture(NamedTuple):
     name: str
