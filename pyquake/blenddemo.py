@@ -47,6 +47,20 @@ def _quake_to_blender_angles(quake_angles: Vec3) -> Vec3:
             math.pi * (quake_angles[1] - 90.) / 180)
 
 
+def _fix_angles(old_angles, new_angles, degrees=False):
+    # Undo wrapping of the yaw
+    if degrees:
+        t = 360
+    else:
+        t = 2 * np.pi
+
+    old_yaw = old_angles[1] / t
+    new_yaw = new_angles[1] / t
+    i = old_yaw // 1
+    j = np.argmin(np.abs(np.array([i - 1, i, i + 1]) + new_yaw - old_yaw))
+    return (new_angles[0], (new_yaw + i + j - 1) * t, new_angles[2])
+
+
 @dataclass(frozen=True)
 class AliasModelEntityFrame:
     time: float
@@ -57,10 +71,12 @@ class AliasModelEntityFrame:
     visible: bool
 
     def update(self, time, origin_update, angles_update, frame_update, skin_idx_update) -> "AliasModelEntityFrame":
+
+        new_angles = _fix_angles(self.angles, _patch_vec(self.angles, angles_update))
         return AliasModelEntityFrame(
             time=time,
             origin=_patch_vec(self.origin, origin_update),
-            angles=_patch_vec(self.angles, angles_update),
+            angles=new_angles,
             frame=self.frame if frame_update is None else frame_update,
             skin_idx=self.skin_idx if skin_idx_update is None else skin_idx_update,
             visible=True,
@@ -221,6 +237,7 @@ class LevelAnimator:
         self._entity_to_model = {}
         self._bb = None
         self._view_path = []
+        self._fixed_view_angles = (0, 0, 0)
 
         demo_cam = bpy.data.cameras.new(name="demo_cam")
         demo_cam.lens = 18.0
@@ -229,6 +246,11 @@ class LevelAnimator:
         self._demo_cam_obj.parent = self._world_obj
 
     def handle_parsed(self, view_angles, parsed, time):
+        self._fixed_view_angles = _fix_angles(self._fixed_view_angles, view_angles, degrees=True)
+
+        if parsed.msg_type == proto.ServerMessageType.SETANGLE:
+            self._fixed_view_angles = parsed.view_angles
+
         if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
             map_path = parsed.models[0]
             self._map_name = re.match(r"maps/([a-zA-Z0-9_]+).bsp", map_path).group(1)
@@ -267,7 +289,8 @@ class LevelAnimator:
                 self._view_path.append((time, view_origin))
                 self._demo_cam_obj.location = view_origin
                 self._demo_cam_obj.keyframe_insert('location', frame=frame)
-                self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
+
+                self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(self._fixed_view_angles)
                 self._demo_cam_obj.keyframe_insert('rotation_euler', frame=frame)
 
                 self._bb.set_visible_sample_as_light(view_origin, bounces=2)
