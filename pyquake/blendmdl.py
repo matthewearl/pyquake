@@ -21,7 +21,7 @@
 import io
 import itertools
 from dataclasses import dataclass
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, List
 
 import bmesh
 import bpy
@@ -43,6 +43,7 @@ class BlendMdl:
     am: "AliasMdl"
     blocks: Dict
     obj: bpy_types.Object
+    sub_objs: List[bpy_types.Object]
     sample_as_light_mats: Set[bpy.types.Material]
 
 
@@ -132,6 +133,7 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cf
 
     sample_as_light_mats = set()
     obj = bpy.data.objects.new(obj_name, None)
+    sub_objs = []
     bpy.context.scene.collection.objects.link(obj)
     for tri_set_idx, tri_set in enumerate(am.disjoint_tri_sets):
         # Create the mesh and object
@@ -146,6 +148,7 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cf
         mesh.from_pydata(*pydata)
         subobj = bpy.data.objects.new(subobj_name, mesh)
         subobj.parent = obj
+        sub_objs.append(subobj)
         bpy.context.scene.collection.objects.link(subobj)
 
         # Create shape key blocks, used for animation.
@@ -207,5 +210,5 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cf
         mesh.materials.append(mat)
         _set_uvs(mesh, am, tri_set)
 
-    return BlendMdl(am, blocks, obj, sample_as_light_mats)
+    return BlendMdl(am, blocks, obj, sub_objs, sample_as_light_mats)
 

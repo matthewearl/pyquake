@@ -19,6 +19,7 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
+import dataclasses
 import functools
 import logging
 import math
@@ -53,6 +54,7 @@ class AliasModelEntityFrame:
     angles: Vec3
     frame: int
     skin_idx: int
+    visible: bool
 
     def update(self, time, origin_update, angles_update, frame_update, skin_idx_update) -> "AliasModelEntityFrame":
         return AliasModelEntityFrame(
@@ -61,7 +63,11 @@ class AliasModelEntityFrame:
             angles=_patch_vec(self.angles, angles_update),
             frame=self.frame if frame_update is None else frame_update,
             skin_idx=self.skin_idx if skin_idx_update is None else skin_idx_update,
+            visible=True,
         )
+
+    def set_invisible(self):
+        return dataclasses.replace(self, visible=False)
 
 
 @dataclass
@@ -87,6 +93,11 @@ class AliasModelAnimator:
         self.static_mats = []
 
     def handle_parsed(self, view_angles, parsed, time):
+        if parsed.msg_type == proto.ServerMessageType.TIME:
+            # Set every (baselined) entity to invisible, until an update is seen.
+            for entity_num, ame in self._entities.items():
+                ame.path.append(ame.path[-1].set_invisible())
+
         if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
             self._model_paths = parsed.models
 
@@ -99,6 +110,7 @@ class AliasModelAnimator:
                     angles=parsed.angles,
                     frame=parsed.frame,
                     skin_idx=parsed.skin,
+                    visible=True,
                 )
                 self._static_entities.append(AliasModelEntity(
                     model_path=model_path,
@@ -114,6 +126,7 @@ class AliasModelAnimator:
                     angles=parsed.angles,
                     frame=parsed.frame,
                     skin_idx=parsed.skin,
+                    visible=False,
                 )
                 self._entities[parsed.entity_num] = AliasModelEntity(
                     model_path=model_path,
@@ -123,7 +136,7 @@ class AliasModelAnimator:
         if parsed.msg_type == proto.ServerMessageType.UPDATE:
             if parsed.entity_num in self._entities:
                 ame = self._entities[parsed.entity_num]
-                ame.path.append(ame.path[-1].update(time, parsed.origin, parsed.angle, parsed.frame, parsed.skin))
+                ame.path[-1] = ame.path[-1].update(time, parsed.origin, parsed.angle, parsed.frame, parsed.skin)
 
         self._final_time = time
 
@@ -163,6 +176,11 @@ class AliasModelAnimator:
                     bm.obj.keyframe_insert('location', frame=blender_frame)
                     bm.obj.rotation_euler = (0., 0., fr.angles[1])  # ¯\_(ツ)_/¯
                     bm.obj.keyframe_insert('rotation_euler', frame=blender_frame)
+                    for sub_obj in bm.sub_objs:
+                        sub_obj.hide_render = not fr.visible
+                        sub_obj.keyframe_insert('hide_render', frame=blender_frame)
+                        sub_obj.hide_viewport = not fr.visible
+                        sub_obj.keyframe_insert('hide_viewport', frame=blender_frame)
 
         for idx, ame in enumerate(self._static_entities):
             assert len(ame.path) == 1
