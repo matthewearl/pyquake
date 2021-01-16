@@ -6,9 +6,8 @@
             "strength": 1
         },
         "m_g_key": {
-            "sample_as_light": true,
             "force_fullbright": true,
-            "strength": 100
+            "strength": 10
         },
         "flame2": {
             "sample_as_light": true,

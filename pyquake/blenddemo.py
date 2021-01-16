@@ -175,6 +175,10 @@ class AliasModelAnimator:
                     blender_frame = int(round(self._fps * fr.time))
                     bm.obj.keyframe_insert('location', frame=blender_frame)
                     bm.obj.rotation_euler = (0., 0., fr.angles[1])  # ¯\_(ツ)_/¯
+
+                    if bm.am.header['flags'] & mdl.ModelFlags.ROTATE:
+                        bm.obj.rotation_euler.z = fr.time * 100. * np.pi / 180
+
                     bm.obj.keyframe_insert('rotation_euler', frame=blender_frame)
                     for sub_obj in bm.sub_objs:
                         sub_obj.hide_render = not fr.visible
