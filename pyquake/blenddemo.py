@@ -256,7 +256,7 @@ class LevelAnimator:
         static_mats = am_animator.static_mats
         for time, view_origin in self._view_path:
             blender_frame = int(round(self._fps * time))
-            vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=1)
+            vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=2)
             for pos, mats in static_mats:
                 is_vis = leaf_from_pos(pos) in vis_leaves
                 for mat in mats:

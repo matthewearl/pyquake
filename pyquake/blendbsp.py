@@ -185,7 +185,7 @@ def _get_bbox(a):
     out = []
     for axis in range(2):
         b = np.where(np.any(a, axis=axis))
-        out.append([np.min(b), np.max(b)])
+        out.append([np.min(b), np.max(b) + 1])
     return np.array(out).T
 
 
@@ -228,12 +228,12 @@ def _truncate_face(vertices, normal, plane_dist):
         dist = np.dot(vert, normal) - plane_dist
         prev_dist = np.dot(prev_vert, normal) - plane_dist
 
-        if (prev_dist >= 0) != (dist >= 0):
+        if (prev_dist > 0) != (dist > 0):
             alpha = -dist / (prev_dist - dist)
             new_vert = tuple(alpha * np.array(prev_vert) + (1 - alpha) * np.array(vert))
             new_vertices.append(new_vert)
 
-        if dist >= 0:
+        if dist > 0:
             new_vertices.append(vert)
 
         prev_vert = vert
