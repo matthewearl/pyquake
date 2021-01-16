@@ -1,4 +1,20 @@
 {
+    "models": {
+        "__default__": {
+            "sample_as_light": false,
+            "force_fullbright": false,
+            "strength": 1
+        },
+        "m_g_key": {
+            "sample_as_light": true,
+            "force_fullbright": true,
+            "strength": 100
+        },
+        "flame2": {
+            "sample_as_light": true,
+            "strength": 10000
+        }
+    },
     "maps": {
         "100m": {
             "do_materials": true,
@@ -129,7 +145,7 @@
                     "strength": 1,
                     "sample_as_light": false,
                     "tint": [1, 1, 1, 1],
-                    "overlay": true
+                    "overlay": false
                 },
                 "key03_02": {
                     "strength": 200,

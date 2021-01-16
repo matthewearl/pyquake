@@ -117,8 +117,16 @@ def load_model(pak_root, mdl_name, obj_name, frames, skin_idx=0, fps=30):
     add_model(am, pal, mdl_name, obj_name, frames, skin_idx, fps)
 
 
-def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, static=False, fps=30):
+def _get_model_config(mdl_name, mdls_cfg):
+    cfg = dict(mdls_cfg['__default__'])
+    cfg.update(mdls_cfg.get(mdl_name, {}))
+    return cfg
+
+
+def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cfg, static=False, fps=30):
     frames = list(frames)
+
+    mdl_cfg = _get_model_config(mdl_name, mdls_cfg)
 
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
@@ -170,18 +178,23 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, static=
             _animate(am, blocks, subobj, loop_frames, fps)
 
         # Set up material
-        fullbright_frac = _get_tri_set_fullbright_frac(am, tri_set, skin_idx)
-        sample_as_light = fullbright_frac > 0.8
+        sample_as_light = mdl_cfg['sample_as_light']
         mat_name = f"{mdl_name}_skin{skin_idx}"
+
         if sample_as_light:
             mat_name = f"{mat_name}_{obj_name}_triset{tri_set_idx}_fullbright"
+
         if mat_name not in bpy.data.materials:
             mat, nodes, links = blendmat.new_mat(mat_name)
-            array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(pal, am.skins[skin_idx])
+            array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(
+                pal,
+                am.skins[skin_idx],
+                force_fullbright=mdl_cfg['force_fullbright']
+            )
             im = blendmat.im_from_array(mat_name, array_im)
             if fullbright_array_im is not None:
                 fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
-                strength = 10_000. if sample_as_light else 1.0
+                strength = mdl_cfg['strength']
                 blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, strength)
             else:
                 blendmat.setup_diffuse_material(nodes, links, im)

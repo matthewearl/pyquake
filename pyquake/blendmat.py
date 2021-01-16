@@ -40,8 +40,11 @@ def im_from_array(name, array_im):
     return im
 
 
-def array_ims_from_indices(pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1)):
-    fullbright_array = (im_indices >= 224)
+def array_ims_from_indices(pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1), force_fullbright=False):
+    if force_fullbright:
+        fullbright_array = np.full_like(im_indices, True)
+    else:
+        fullbright_array = (im_indices >= 224)
 
     array_im = pal[im_indices]
     array_im = array_im ** gamma

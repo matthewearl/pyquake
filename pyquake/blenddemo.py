@@ -71,7 +71,7 @@ class AliasModelEntity:
 
 
 class AliasModelAnimator:
-    def __init__(self, world_obj, fs, pal, fps=30):
+    def __init__(self, world_obj, fs, pal, mdls_cfg, fps=30):
         self._world_obj = world_obj
         self._model_paths = None
         self._entities = {}
@@ -80,6 +80,7 @@ class AliasModelAnimator:
         self._pal = pal
         self._fps = fps
         self._final_time = None
+        self._mdls_cfg = mdls_cfg
 
         self.entity_objs = {}
         self.static_entity_objs = {}
@@ -148,6 +149,7 @@ class AliasModelAnimator:
                                     frames,
                                     [fr.skin_idx for fr in ame.path][-1],
                                     self._final_time,
+                                    self._mdls_cfg,
                                     static=False,
                                     fps=self._fps)
             bm.obj.parent = self._world_obj
@@ -172,6 +174,7 @@ class AliasModelAnimator:
                                     [(frame.time, frame.frame)],
                                     [fr.skin_idx for fr in ame.path][-1],
                                     self._final_time,
+                                    self._mdls_cfg,
                                     static=True,
                                     fps=self._fps)
             bm.obj.parent = self._world_obj
@@ -256,7 +259,7 @@ class LevelAnimator:
         static_mats = am_animator.static_mats
         for time, view_origin in self._view_path:
             blender_frame = int(round(self._fps * time))
-            vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=2)
+            vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=1)
             for pos, mats in static_mats:
                 is_vis = leaf_from_pos(pos) in vis_leaves
                 for mat in mats:
@@ -272,7 +275,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
 
     if load_level:
         level_animator = LevelAnimator(world_obj, fs, pal, config, fps)
-    am_animator = AliasModelAnimator(world_obj, fs, pal, fps)
+    am_animator = AliasModelAnimator(world_obj, fs, pal, config['models'], fps)
 
     time = None
     first_time = None
