@@ -18,17 +18,15 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import io
-import itertools
 from dataclasses import dataclass
-from typing import Dict, Any, Set, List
+from typing import Dict, Set, List
 
 import bmesh
 import bpy
 import bpy_types
 import numpy as np
 
-from . import pak, mdl, blendmat
+from . import mdl, blendmat
 
 
 @dataclass
@@ -72,21 +70,19 @@ class BlendMdl:
             c.keyframe_points[-1].interpolation = 'LINEAR'
 
     def add_pose_keyframe(self, pose_num: int, time: float, fps: float):
-        if self._group_pose_num is None:
-            self._update_pose(time, pose_num, fps)
-        elif self._last_time is not None:
-            if self._group_pose_num != pose_num:
-                raise Exception("Group pose changed")
-
-            start_loop = int(np.floor(self._last_time / self._times[-1]))
-            end_loop = int(np.ceil(time / self._times[-1]))
-            for loop_num in range(start_loop, end_loop)
-                for pose_num, time_offset in enumerate(self._times[:-1]):
-                    frame_time = loop_num * self._times[-1] + time_offset
-                    if self._last_time <= frame_time < time:
-                        self._update_pose(time, pose_num, fps)
+        if self._group_pose_num is not None:
+            raise Exception("Cannot key-frame static models")
+        self._update_pose(time, pose_num, fps)
 
         self._last_time = time
+
+    def done(self, final_time: float, fps: float):
+        if self._group_pose_num is not None:
+            loop_time = 0
+            while loop_time < final_time:
+                for pose_num, offset in enumerate(self._times[:-1]):
+                    self._update_pose(loop_time + offset, pose_num, fps)
+                loop_time += self._times[-1]
 
 
 def _set_uvs(mesh, am, tri_set):
@@ -128,13 +124,6 @@ def _get_tri_set_fullbright_frac(am, tri_set, skin_idx):
         fullbright_area += np.sum(mask * (skin >= 224))
 
     return fullbright_area / skin_area
-
-
-def load_model(pak_root, mdl_name, obj_name, frames, skin_idx=0, fps=30):
-    fs = pak.Filesystem(pak_root)
-    am = mdl.AliasModel(fs.open(f"progs/{mdl_name}.mdl"))
-    pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
-    add_model(am, pal, mdl_name, obj_name, frames, skin_idx, fps)
 
 
 def _get_model_config(mdl_name, mdls_cfg):
@@ -194,7 +183,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=N
         bpy.context.scene.collection.objects.link(subobj)
 
         # Create shape keys, used for animation.
-        if not static:
+        if static_frame is None:
             shape_keys.append([
                 _create_shape_key(subobj, frame.frame, vert_map) for frame in am.frames
             ])
