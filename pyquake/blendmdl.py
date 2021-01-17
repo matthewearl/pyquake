@@ -19,7 +19,7 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from dataclasses import dataclass
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Optional
 
 import bmesh
 import bpy
@@ -32,7 +32,6 @@ from . import mdl, blendmat
 @dataclass
 class BlendMdl:
     am: "AliasMdl"
-    blocks: Dict
     obj: bpy_types.Object
     sub_objs: List[bpy_types.Object]
     sample_as_light_mats: Set[bpy.types.Material]
@@ -43,7 +42,7 @@ class BlendMdl:
     _current_pose_num: Optional[int] = None
     _last_time: Optional[float] = None
 
-    def _update_pose(self, last_time: float, time: float, pose_num: int, fps: float):
+    def _update_pose(self, time: float, pose_num: int, fps: float):
         for sub_obj, shape_keys in zip(self.sub_objs, self._shape_keys):
             blender_frame = int(round(fps * time))
             if self._current_pose_num is not None:
@@ -53,9 +52,9 @@ class BlendMdl:
                 fcurve = sub_obj.data.shape_keys.animation_data.action.fcurves[self._current_pose_num]
                 fcurve.keyframe_points[-1].interpolation = 'LINEAR'
 
-            last_blender_frame = int(round(fps * last_time))
-            shape_keys[pose_num].value = 0
-            shape_keys[pose_num].keyframe_insert('value', frame=last_blender_frame)
+                last_blender_frame = int(round(fps * self._last_time))
+                shape_keys[pose_num].value = 0
+                shape_keys[pose_num].keyframe_insert('value', frame=last_blender_frame)
 
             shape_keys[pose_num].value = 1
             shape_keys[pose_num].keyframe_insert('value', frame=blender_frame)
@@ -139,26 +138,22 @@ def _create_shape_key(obj, simple_frame, vert_map):
     return shape_key
 
 
-def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=None):
+def add_model(am, pal, mdl_name, obj_name, skin_num, mdls_cfg, static_pose_num=None):
     mdl_cfg = _get_model_config(mdl_name, mdls_cfg)
 
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
     # Validate frames and extract the group pose num (for static models)
-    group_pose_num = None
     group_times = None
-    if static_frame is None:
+    if static_pose_num is None:
         for frame in am.frames:
             if frame.frame_type != mdl.FrameType.SINGLE:
                 raise Exception(f"Frame type {frame.frame_type} not supported for non-static models")
     else:
-        group_pose_num = static_pose_num
-        group_frame = am.frames[group_pose_num]
+        group_frame = am.frames[static_pose_num]
         group_times = group_frame.times
         if group_frame.frame_type != mdl.FrameType.GROUP:
             raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
-        for simple_frame in group_frame.frames:
-            shape_keys.append(_create_shape_key(subobj, simple_frame, vert_map))
 
     # Set up things specific to each tri-set
     sample_as_light_mats = set()
@@ -183,7 +178,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=N
         bpy.context.scene.collection.objects.link(subobj)
 
         # Create shape keys, used for animation.
-        if static_frame is None:
+        if static_pose_num is None:
             shape_keys.append([
                 _create_shape_key(subobj, frame.frame, vert_map) for frame in am.frames
             ])
@@ -195,7 +190,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=N
 
         # Set up material
         sample_as_light = mdl_cfg['sample_as_light']
-        mat_name = f"{mdl_name}_skin{skin_idx}"
+        mat_name = f"{mdl_name}_skin{skin_num}"
 
         if sample_as_light:
             mat_name = f"{mat_name}_{obj_name}_triset{tri_set_idx}_fullbright"
@@ -204,7 +199,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=N
             mat, nodes, links = blendmat.new_mat(mat_name)
             array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(
                 pal,
-                am.skins[skin_idx],
+                am.skins[skin_num],
                 force_fullbright=mdl_cfg['force_fullbright']
             )
             im = blendmat.im_from_array(mat_name, array_im)
@@ -223,6 +218,6 @@ def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=N
         mesh.materials.append(mat)
         _set_uvs(mesh, am, tri_set)
 
-    return BlendMdl(am, blocks, obj, sub_objs, sample_as_light_mats,
-                    group_pose_num, group_times, shape_keys)
+    return BlendMdl(am, obj, sub_objs, sample_as_light_mats,
+                    static_pose_num, group_times, shape_keys)
 

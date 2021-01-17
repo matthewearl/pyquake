@@ -19,6 +19,7 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
+import collections
 import dataclasses
 import functools
 import logging
@@ -28,6 +29,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 import bpy
+import bpy_types
 import numpy as np
 
 from . import proto, bsp, mdl, blendmdl, blendbsp
@@ -74,7 +76,7 @@ class _EntityInfo:
         def none_or(a, b):
             return a if a is not None else b
 
-        angles = _fix_angles(self.angles, _patch_vec(baseline.angles, msg.angles))
+        angles = _fix_angles(self.angles, _patch_vec(baseline.angles, msg.angle))
 
         return dataclasses.replace(
             baseline,
@@ -111,10 +113,10 @@ class ManagedObject:
 
 @dataclass
 class AliasModelManagedObject(ManagedObject):
-    bm: BlendMdl
+    bm: blendmdl.BlendMdl
 
     def add_pose_keyframe(self, pose_num: int, time: float):
-        bm.add_pose_keyframe(pose_num, time, self.fps)
+        self.bm.add_pose_keyframe(pose_num, time, self.fps)
 
     def add_visible_keyframe(self, visible: bool, time: float):
         blender_frame = self.get_blender_frame(time)
@@ -125,14 +127,15 @@ class AliasModelManagedObject(ManagedObject):
             sub_obj.keyframe_insert('hide_viewport', frame=blender_frame)
 
     def add_origin_keyframe(self, origin: Vec3, time: float):
-        self.bm.obj.location = location
-        self.bm.obj.insert_keyframe('location', self._get_blender_frame(time))
+        self.bm.obj.location = origin
+        self.bm.obj.keyframe_insert('location', frame=self._get_blender_frame(time))
 
     def add_angles_keyframe(self, angles: Vec3, time: float):
-        self.bm.obj.rotation_euler = location
+        # Should this use the other angles?
+        self.bm.obj.rotation_euler = (0., 0., angles[1])
         if self.bm.am.header['flags'] & mdl.ModelFlags.ROTATE:
             self.bm.obj.rotation_euler.z = time * 100. * np.pi / 180
-        self.bm.obj.insert_keyframe('rotation_euler', self._get_blender_frame(time))
+        self.bm.obj.keyframe_insert('rotation_euler', frame=self._get_blender_frame(time))
 
 
 @dataclass
@@ -147,11 +150,11 @@ class BspModelManagedObject(ManagedObject):
 
     def add_origin_keyframe(self, origin: Vec3, time: float):
         self.obj.location = location
-        self.obj.insert_keyframe('location', self._get_blender_frame(time))
+        self.obj.keyframe_insert('location', frame=self._get_blender_frame(time))
 
     def add_angles_keyframe(self, angles: Vec3, time: float):
         self.obj.rotation_euler = location
-        self.obj.insert_keyframe('rotation_euler', self._get_blender_frame(time))
+        self.obj.keyframe_insert('rotation_euler', frame=self._get_blender_frame(time))
 
 
 @dataclass
@@ -187,7 +190,7 @@ class ObjectManager:
         self._static_objects: List[ManagedObject] = []
         self._static_object_leaves: List[bsp.Leaf] = []
 
-        self._world_obj = bpy.data.objects.new(self._world_obj_name, None)
+        self._world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self._world_obj)
 
         demo_cam = bpy.data.cameras.new(name="demo_cam")
@@ -197,7 +200,7 @@ class ObjectManager:
         self._demo_cam_obj.parent = self._world_obj
 
     @functools.lru_cache(1024)
-    def _leaf_from_pos(pos):
+    def _leaf_from_pos(self, pos):
         return self._bb.bsp.models[0].get_leaf_from_point(pos)
 
     def set_model_paths(self, model_paths: List[str]):
@@ -224,7 +227,8 @@ class ObjectManager:
     def set_view_entity(self, entity_num):
         self._view_entity_num = entity_num
 
-    def create_static_object(self, model_num, frame, origin, angles, frame, skin):
+    def create_static_object(self, model_num, frame, origin, angles, skin):
+        model_path = self._model_paths[model_num - 1]
         am = mdl.AliasModel(self._fs.open(model_path))
         bm = blendmdl.add_model(am,
                                 self._pal,
@@ -234,7 +238,8 @@ class ObjectManager:
                                 self._config['models'],
                                 static_pose_num=frame)
         bm.obj.parent = self._world_obj
-        bm.obj.location = frame.origin
+        bm.obj.location = origin
+        bm.obj.rotation_euler = (0., 0., angles[1])
 
         self._static_objects.append(bm)
         self._static_object_leaves.append(self._leaf_from_pos(origin))
@@ -249,6 +254,7 @@ class ObjectManager:
             model_name = self._path_to_model_name(model_path),
             bm = blendmdl.add_model(am,
                                     self._pal,
+                                    model_name,
                                     f'ent{entity_num}_{model_name}',
                                     skin_num,
                                     self._config['models'])
@@ -289,11 +295,11 @@ class ObjectManager:
         # Unhide objects that were updated this frame, or whose model changed.
         for entity_num in updated:
             if (prev_updated is None or entity_num not in prev_updated or
-                (entity_num in prev_entities and prev_entities[entity_num].model_num !=
-                    entities[entity_num].model_num)):
-            self._objs[entity_num, entities[entity_num].model_num].add_visible_keyframe(
-                True, time
-            )
+                (entity_num in prev_entities and
+                 prev_entities[entity_num].model_num != entities[entity_num].model_num)):
+                self._objs[entity_num, entities[entity_num].model_num].add_visible_keyframe(
+                    True, time
+                )
 
         # Set sample_as_light materials.
         view_origin = entities[self._view_entity_num].origin
@@ -328,7 +334,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
     demo_done = False
     obj_mgr = ObjectManager(fs, config, fps, world_obj_name, load_level)
 
-    msg_iter = proto.read_demo_file(demo_file))
+    msg_iter = proto.read_demo_file(demo_file)
 
     while not demo_done:
         time = None
@@ -348,7 +354,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
             if parsed.msg_type == proto.ServerMessageType.TIME:
                 if time is not None:
                     raise Exception("Multiple time messages per update")
-                time = msg.time
+                time = parsed.time
                 if time >= 5:
                     return
 
@@ -363,8 +369,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
 
             if parsed.msg_type == proto.ServerMessageType.SPAWNSTATIC:
                 obj_mgr.create_static_object(
-                    parsed.model_num, parsed.frame, parsed.origin, parsed.angles,
-                    parsed.frame, parsed.skin
+                    parsed.model_num, parsed.frame, parsed.origin, parsed.angles, parsed.skin
                 )
 
             if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
@@ -377,10 +382,11 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 )
 
             if parsed.msg_type == proto.ServerMessageType.UPDATE:
-                baseline = baseline_entitities[parsed.entity_num]
+                baseline = baseline_entities[parsed.entity_num]
                 prev_info = entities.get(parsed.entity_num, baseline)
                 entities[parsed.entity_num] = prev_info.update(parsed, baseline)
                 updated.add(parsed.entity_num)
 
-        obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
+        if entities:
+            obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
         prev_updated = updated
