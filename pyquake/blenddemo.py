@@ -92,6 +92,312 @@ class AliasModelEntity:
     path: List[AliasModelEntityFrame]
 
 
+@dataclass
+class ManagedObject:
+    fps: float
+
+    def _get_blender_frame(self, time):
+        return int(round(self.fps * time))
+
+    def add_pose_keyframe(self, pose_num: int, time: float):
+        raise NotImplementedError
+
+    def add_visible_keyframe(self, visible: bool, time: float):
+        raise NotImplementedError
+
+    def add_origin_keyframe(self, origin: Vec3, time: float):
+        raise NotImplementedError
+
+    def add_angles_keyframe(self, angles: Vec3, time: float):
+        raise NotImplementedError
+
+
+@dataclass
+class AliasModelManagedObject(ManagedObject):
+    bm: BlendMdl
+
+    def add_pose_keyframe(self, pose_num: int, time: float):
+        bm.add_pose_keyframe(pose_num, time, self.fps)
+
+    def add_visible_keyframe(self, visible: bool, time: float):
+        blender_frame = self.get_blender_frame(time)
+        for sub_obj in self.sub_objs:
+            sub_obj.hide_render = not visible
+            sub_obj.keyframe_insert('hide_render', frame=blender_frame)
+            sub_obj.hide_viewport = not visible
+            sub_obj.keyframe_insert('hide_viewport', frame=blender_frame)
+
+    def add_origin_keyframe(self, origin: Vec3, time: float):
+        self.bm.obj.location = location
+        self.bm.obj.insert_keyframe('location', self._get_blender_frame(time))
+
+    def add_angles_keyframe(self, angles: Vec3, time: float):
+        self.bm.obj.rotation_euler = location
+        if self.bm.am.header['flags'] & mdl.ModelFlags.ROTATE:
+            self.bm.obj.rotation_euler.z = time * 100. * np.pi / 180
+        self.bm.obj.insert_keyframe('rotation_euler', self._get_blender_frame(time))
+
+
+@dataclass
+class BspModelManagedObject(ManagedObject):
+    obj: bpy_types.Object
+
+    def add_pose_keyframe(self, pose_num: int, time: float):
+        pass
+
+    def add_visible_keyframe(self, visible: bool, time: float):
+        pass
+
+    def add_origin_keyframe(self, origin: Vec3, time: float):
+        self.obj.location = location
+        self.obj.insert_keyframe('location', self._get_blender_frame(time))
+
+    def add_angles_keyframe(self, angles: Vec3, time: float):
+        self.obj.rotation_euler = location
+        self.obj.insert_keyframe('rotation_euler', self._get_blender_frame(time))
+
+
+@dataclass
+class NullManagedObject(ManagedObject):
+    def add_pose_keyframe(self, pose_num: int, time: float):
+        pass
+
+    def add_visible_keyframe(self, visible: bool, time: float):
+        pass
+
+    def add_origin_keyframe(self, origin: Vec3, time: float):
+        pass
+
+    def add_angles_keyframe(self, angles: Vec3, time: float):
+        pass
+
+
+class ObjectManager:
+    def __init__(self, fs, config, fps, world_obj_name='demo', load_level=True, relative_time=False):
+        assert not relative_time, "Not yet supported"
+
+        self._fs = fs
+        self._fps = fps
+        self._num_statics = 0
+        self._config = config
+
+        self._pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
+
+        self._bb: Optional[blendbsp.BlendBsp] = None
+        self._objs: Dict[Tuple[int, int], ManagedObject] = {}
+        self._model_paths: Optional[List[str]] = None
+
+
+    def set_model_paths(self, model_paths: List[str]):
+        self._model_paths = model_paths
+
+        map_path = self._model_paths[0]
+        b = bsp.Bsp(self._fs.open(map_path))
+        map_name = re.match(r"maps/([a-zA-Z0-9_]+).bsp", map_path).group(1)
+        self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
+
+    @functools.lru_cache(None)
+    def _load_alias_model(self, model_path):
+        return mdl.AliasModel(self._fs.open(model_path))
+
+    def create_static_object(self, model_num):
+        am = mdl.AliasModel(self._fs.open(model_path))
+        bm = blendmdl.add_model(am,
+                                self._pal,
+                                self._path_to_model_name(model_path),
+                                f"static{self._num_statics}",
+                                [(frame.time, frame.frame)],
+                                [fr.skin_idx for fr in ame.path][-1],
+                                self._final_time,
+                                self._mdls_cfg,
+                                static=True,
+                                fps=self._fps)
+        bm.obj.parent = self._world_obj
+        bm.obj.location = frame.origin
+
+        return bm
+
+    def _create_managed_object(self, entity_num, model_num, skin_num):
+        model_path = self._model_paths[model_num - 1]
+        if model_path.startswith('*'):
+            map_model_idx = int(model_path[1:])
+            managed_obj = BspModelManagedObject(self._fps, self._bb.model_objs[map_model_idx])
+        elif model_path.endswith('.mdl'):
+            am = self._load_alias_model(model_path)
+            base_name = model_path.rsplit('/', 1)[1].rsplit('.', 1)[0]
+            bm = blendmdl.add_model(am,
+                                    self._pal,
+                                    f'ent{entity_num}_{base_name}',
+                                    skin_num,
+                                    self._config['models'])
+            managed_obj = AliasModelManagedObject(self._fps, bm)
+        else:
+            managed_obj = NullManagedObject(self._fps)
+
+        return managed_obj
+
+    def update(self, time, prev_entities, entities, prev_updated, updated):
+        blender_frame = int(round(self._fps * time))
+
+        # Hide any objects that weren't updated in this frame, or whose model changed.
+        for entity_num in prev_updated:
+            if (prev_entities[entity_num].model_num != entities[entity_num.model_num]
+                    or entity_num not in updated):
+                self._objs[entity_num, prev_entities[entity_num].model_num].add_visible_keyframe(
+                    False, time
+                )
+
+        for entity_num in updated:
+            # Create managed objects where we don't already have one for the given entity num / model num.
+            ent = entities[entity_num]
+            model_num = entities[entity_num].model_num
+            key = entity_num, model_num
+            if key not in self._model_paths:
+                obj = self._create_managed_object(entity_num, model_num, ent.skin)
+                self._objs[entity_num, model_num] = obj
+            else:
+                obj = self._objs[entity_num, model_num]
+
+            # Update position / rotation / pose
+            obj.add_origin_keyframe(ent.origin, time)
+            obj.add_angles_keyframe(ent.angles, time)
+            obj.add_pose_keyframe(ent.frame, time)
+
+        # Unhide objects that were updated this frame, or whose model changed.
+        for entity_num in updated:
+            if (prev_updated is None or entity_num not in prev_updated or
+                (entity_num in prev_entities and prev_entities[entity_num].model_num !=
+                    entities[entity_num].model_num)):
+            self._objs[entity_num, entities[entity_num].model_num].add_visible_keyframe(
+                True, time
+            )
+
+
+@dataclass
+class EntityInfo:
+    """Information for a single entity slot"""
+    model_num: int
+    frame: int
+    skin: int
+    origin: Vec3
+    angles: Vec3
+
+    def update(self, msg: proto.ServerMessageUpdate, baseline: "EntityInfo"):
+        def none_or(a, b):
+            return a if a is not None else b
+
+        angles = _fix_angles(self.angles, _patch_vec(baseline.angles, msg.angles))
+
+        return dataclasses.replace(
+            baseline,
+            model_num=none_or(msg.model_num, baseline.model_num),
+            frame=none_or(msg.frame, baseline.frame),
+            skin=none_or(msg.skin, baseline.skin),
+            origin=_patch_vec(baseline.origin, msg.origin),
+            angles=angles
+        )
+
+
+
+_DEFAULT_BASELINE = EntityInfo(0, 0, 0, (0, 0, 0), (0, 0, 0))
+
+class DemoAnimator:
+    def __init__(self, demo_file, fs, config, fps=30, world_obj_name='demo',
+                 load_level=True, relative_time=False):
+        assert not relative_time, "Not yet supported"
+
+        self._demo_file = demo_file
+        self._fs = fs
+        self._config = config
+        self._fps = fps
+        self._load_level = load_level
+        self._world_obj_name = world_obj_name
+        self._relative_time = relative_time
+
+        self.static_mats: List[Vec3, Set[bpy.types.Material]] = []
+
+        self._world_obj = bpy.data.objects.new(self._world_obj_name, None)
+        bpy.context.scene.collection.objects.link(self._world_obj)
+
+        self._process_messages(proto.read_demo_file(demo_file))
+
+    def _load_blend_bsp(map_path):
+        map_name = re.match(r"maps/([a-zA-Z0-9_]+).bsp", map_path).group(1)
+        b = bsp.Bsp(self._fs.open(map_path))
+        return blendbsp.add_bsp(b, self._pal, self._map_name, self._config)
+
+    def _path_to_model_name(self, mdl_path):
+        m = re.match(r"progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
+        if m is None:
+            raise Exception("Unexpected model path {mdl_path}")
+        return m.group(1)
+
+    def _process_messages(self, msg_iter):
+        baseline_entities: Dict[int, EntityInfo] = collections.defaultdict(lambda: _DEFAULT_BASELINE)
+        entities: Dict[int, EntityInfo] = {}
+        fixed_view_angles: Vec3 = (0, 0, 0)
+        objs: Dict[int, bpy_types.Object] = {}
+        model_paths: Optional[List[str]] = None
+        bb: Optional[BlendBsp] = None
+        view_entity: Optional[int] = None
+        prev_updated = None
+
+        while True:
+            time = None
+            update_done = True
+            updated = set()
+            prev_entities = entities
+
+            while not update_done:
+                update_done, view_angles, parsed = next(msg_iter)
+
+                fixed_view_angles = _fix_angles(fixed_view_angles, view_angles, degrees=True)
+
+                if parsed.msg_type == proto.ServerMessageType.TIME:
+                    if time is not None:
+                        raise Exception("Multiple time messages per update")
+                    time = msg.time
+
+                if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
+                    if model_paths is not None:
+                        raise Exception("ServerInfo already received")
+
+                    model_paths = parsed.models
+                    bb = _load_blend_bsp(parsed.models[0])
+                    bb.map_obj.parent = self._world_obj
+
+                if parsed.msg_type == proto.ServerMessageType.SETVIEW:
+                    view_entity = parsed.viewentity
+
+                if parsed.msg_type == proto.ServerMessageType.SETANGLE:
+                    fixed_view_angles = parsed.view_angles
+
+                if parsed.msg_type == proto.ServerMessageType.SPAWNSTATIC:
+                    model_path = model_paths[parsed.model_num - 1]
+                    bm = self._create_static_object(
+                    bm.obj.parent = self._world_obj
+                    bm.obj.location = frame.origin
+                    if bm.sample_as_light_mats:
+                        self.static_mats.append((frame.origin, bm.sample_as_light_mats))
+
+                if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
+                    baseline_entities[parsed.entity_num] = EntityInfo(
+                        model_num=parsed.model_num,
+                        frame=parsed.frame,
+                        skin=parsed.skin,
+                        origin=parsed.origin,
+                        angles=parsed.angles,
+                    )
+
+                if parsed.msg_type == proto.ServerMessageType.UPDATE:
+                    baseline = baseline_entitities[parsed.entity_num]
+                    prev_info = entities.get(parsed.entity_num, baseline)
+                    entities[parsed.entity_num] = prev_info.update(parsed, baseline)
+                    updated.add(parsed.entity_num)
+
+            prev_update = updated
+
+
 class AliasModelAnimator:
     def __init__(self, world_obj, fs, pal, mdls_cfg, fps=30):
         self._world_obj = world_obj
@@ -108,7 +414,7 @@ class AliasModelAnimator:
         self.static_entity_objs = {}
         self.static_mats = []
 
-    def handle_parsed(self, view_angles, parsed, time):
+    def handle_parsed(self, view_angles, parsed, time, update_done):
         if parsed.msg_type == proto.ServerMessageType.TIME:
             # Set every (baselined) entity to invisible, until an update is seen.
             for entity_num, ame in self._entities.items():
@@ -245,7 +551,7 @@ class LevelAnimator:
         bpy.context.scene.collection.objects.link(self._demo_cam_obj)
         self._demo_cam_obj.parent = self._world_obj
 
-    def handle_parsed(self, view_angles, parsed, time):
+    def handle_parsed(self, view_angles, parsed, time, update_done):
         self._fixed_view_angles = _fix_angles(self._fixed_view_angles, view_angles, degrees=True)
 
         if parsed.msg_type == proto.ServerMessageType.SETANGLE:
@@ -324,7 +630,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
 
     time = None
     first_time = None
-    for view_angles, parsed in proto.read_demo_file(demo_file):
+    for update_done, view_angles, parsed in proto.read_demo_file(demo_file):
         if parsed.msg_type == proto.ServerMessageType.TIME:
             if first_time is None:
                 first_time = parsed.time
@@ -333,8 +639,8 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
             else:
                 time = parsed.time
         if load_level:
-            level_animator.handle_parsed(view_angles, parsed, time)
-        am_animator.handle_parsed(view_angles, parsed, time)
+            level_animator.handle_parsed(view_angles, parsed, time, update_done)
+        am_animator.handle_parsed(view_angles, parsed, time, update_done)
 
     am_animator.done()
     if load_level:

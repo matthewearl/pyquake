@@ -753,7 +753,7 @@ def read_demo_file(f):
         msg = _read(f, msg_len)
         while msg:
             parsed, msg = ServerMessage.parse_message(msg)
-            yield view_angles, parsed
+            yield not bool(msg), view_angles, parsed
 
 
 def demo_parser_main():

@@ -31,13 +31,6 @@ import numpy as np
 from . import pak, mdl, blendmat
 
 
-def _create_block(obj, simple_frame, vert_map):
-    block = obj.shape_key_add(name=simple_frame.name)
-    for old_vert_idx, block_vert in zip(vert_map, block.data):
-        block_vert.co = simple_frame.frame_verts[old_vert_idx]
-    return block
-
-
 @dataclass
 class BlendMdl:
     am: "AliasMdl"
@@ -46,28 +39,54 @@ class BlendMdl:
     sub_objs: List[bpy_types.Object]
     sample_as_light_mats: Set[bpy.types.Material]
 
+    _group_pose_num: Optional[int]
+    _times: Optional[List[float]]
+    _shape_keys: List[List[bpy.types.ShapeKey]]
+    _current_pose_num: Optional[int] = None
+    _last_time: Optional[float] = None
 
-def _animate(am, blocks, obj, frames, fps=30):
-    prev_block = None
-    prev_time = None
-    for time, frame_num in frames:
-        block = blocks[frame_num]
+    def _update_pose(self, last_time: float, time: float, pose_num: int, fps: float):
+        for sub_obj, shape_keys in zip(self.sub_objs, self._shape_keys):
+            blender_frame = int(round(fps * time))
+            if self._current_pose_num is not None:
+                shape_keys[self._current_pose_num].value = 0
+                shape_keys[self._current_pose_num].keyframe_insert('value', frame=blender_frame)
 
-        block.value = 1.0
-        block.keyframe_insert('value', frame=int(round(fps * time)))
-        if prev_block:
-            block.value = 0.0
-            block.keyframe_insert('value', frame=int(round(fps * prev_time)))
-            prev_block.value = 0.0
-            prev_block.keyframe_insert('value', frame=int(round(fps * time)))
+                fcurve = sub_obj.data.shape_keys.animation_data.action.fcurves[self._current_pose_num]
+                fcurve.keyframe_points[-1].interpolation = 'LINEAR'
 
-        prev_block = block
-        prev_time = time
+            last_blender_frame = int(round(fps * last_time))
+            shape_keys[pose_num].value = 0
+            shape_keys[pose_num].keyframe_insert('value', frame=last_blender_frame)
 
-    if prev_time is not None:
+            shape_keys[pose_num].value = 1
+            shape_keys[pose_num].keyframe_insert('value', frame=blender_frame)
+
+            fcurve = sub_obj.data.shape_keys.animation_data.action.fcurves[pose_num]
+            fcurve.keyframe_points[-2].interpolation = 'LINEAR'
+            fcurve.keyframe_points[-1].interpolation = 'LINEAR'
+
+            self._current_pose_num = pose_num
+
         for c in obj.data.shape_keys.animation_data.action.fcurves:
-            for kfp in c.keyframe_points:
-                kfp.interpolation = 'LINEAR'
+            c.keyframe_points[-1].interpolation = 'LINEAR'
+
+    def add_pose_keyframe(self, pose_num: int, time: float, fps: float):
+        if self._group_pose_num is None:
+            self._update_pose(time, pose_num, fps)
+        elif self._last_time is not None:
+            if self._group_pose_num != pose_num:
+                raise Exception("Group pose changed")
+
+            start_loop = int(np.floor(self._last_time / self._times[-1]))
+            end_loop = int(np.ceil(time / self._times[-1]))
+            for loop_num in range(start_loop, end_loop)
+                for pose_num, time_offset in enumerate(self._times[:-1]):
+                    frame_time = loop_num * self._times[-1] + time_offset
+                    if self._last_time <= frame_time < time:
+                        self._update_pose(time, pose_num, fps)
+
+        self._last_time = time
 
 
 def _set_uvs(mesh, am, tri_set):
@@ -124,16 +143,39 @@ def _get_model_config(mdl_name, mdls_cfg):
     return cfg
 
 
-def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cfg, static=False, fps=30):
-    frames = list(frames)
+def _create_shape_key(obj, simple_frame, vert_map):
+    shape_key = obj.shape_key_add(name=simple_frame.name)
+    for old_vert_idx, shape_key_vert in zip(vert_map, shape_key.data):
+        shape_key_vert.co = simple_frame.frame_verts[old_vert_idx]
+    return shape_key
 
+
+def add_model(am, pal, mdl_name, obj_name, skin_idx, mdls_cfg, static_pose_num=None):
     mdl_cfg = _get_model_config(mdl_name, mdls_cfg)
 
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
+    # Validate frames and extract the group pose num (for static models)
+    group_pose_num = None
+    group_times = None
+    if static_frame is None:
+        for frame in am.frames:
+            if frame.frame_type != mdl.FrameType.SINGLE:
+                raise Exception(f"Frame type {frame.frame_type} not supported for non-static models")
+    else:
+        group_pose_num = static_pose_num
+        group_frame = am.frames[group_pose_num]
+        group_times = group_frame.times
+        if group_frame.frame_type != mdl.FrameType.GROUP:
+            raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
+        for simple_frame in group_frame.frames:
+            shape_keys.append(_create_shape_key(subobj, simple_frame, vert_map))
+
+    # Set up things specific to each tri-set
     sample_as_light_mats = set()
     obj = bpy.data.objects.new(obj_name, None)
     sub_objs = []
+    shape_keys = []
     bpy.context.scene.collection.objects.link(obj)
     for tri_set_idx, tri_set in enumerate(am.disjoint_tri_sets):
         # Create the mesh and object
@@ -151,34 +193,16 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cf
         sub_objs.append(subobj)
         bpy.context.scene.collection.objects.link(subobj)
 
-        # Create shape key blocks, used for animation.
-        blocks = {}
+        # Create shape keys, used for animation.
         if not static:
-            for frame_num, frame in enumerate(am.frames):
-                if frame.frame_type != mdl.FrameType.SINGLE:
-                    raise Exception(f"Frame type {frame.frame_type} not supported for non-static models")
-                blocks[frame_num] = _create_block(subobj, frame.frame, vert_map)
-            _animate(am, blocks, subobj, frames, fps)
+            shape_keys.append([
+                _create_shape_key(subobj, frame.frame, vert_map) for frame in am.frames
+            ])
         else:
-            if len(frames) != 1:
-                raise Exception(f"Static model must have exactly one frame, not {len(frames)}")
-            group_frame = am.frames[frames[0][1]]
-            if group_frame.frame_type != mdl.FrameType.GROUP:
-                raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
-            for frame_num, simple_frame in enumerate(group_frame.frames):
-                blocks[frame_num] = _create_block(subobj, simple_frame, vert_map)
-
-            # Setup the group frame to loop indefinitely
-            num_loops = int(np.ceil(final_time / group_frame.times[-1]))
-            times = np.empty((num_loops, len(group_frame.frames)))
-            times[:, 0] = 0
-            times[:, 1:] = group_frame.times[None, :-1]
-            times[:, :] += np.arange(num_loops)[:, None] * group_frame.times[-1]
-            times = np.ravel(times)
-
-            loop_frames = zip(times, itertools.cycle(range(len(group_frame.frames))))
-
-            _animate(am, blocks, subobj, loop_frames, fps)
+            shape_keys.append([
+                _create_shape_key(subobj, simple_frame, vert_map)
+                for simple_frame in group_frame.frames
+            ])
 
         # Set up material
         sample_as_light = mdl_cfg['sample_as_light']
@@ -210,5 +234,6 @@ def add_model(am, pal, mdl_name, obj_name, frames, skin_idx, final_time, mdls_cf
         mesh.materials.append(mat)
         _set_uvs(mesh, am, tri_set)
 
-    return BlendMdl(am, blocks, obj, sub_objs, sample_as_light_mats)
+    return BlendMdl(am, blocks, obj, sub_objs, sample_as_light_mats,
+                    group_pose_num, group_times, shape_keys)
 
