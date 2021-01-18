@@ -182,6 +182,7 @@ class NullManagedObject(ManagedObject):
     def done(self, final_time: float):
         pass
 
+
 class ObjectManager:
     def __init__(self, fs, config, fps, world_obj_name='demo', load_level=True):
         assert load_level, "Not yet supported"
@@ -200,14 +201,14 @@ class ObjectManager:
         self._static_objects: List[ManagedObject] = []
         self._static_object_leaves: List[bsp.Leaf] = []
 
-        self._world_obj = bpy.data.objects.new(world_obj_name, None)
-        bpy.context.scene.collection.objects.link(self._world_obj)
+        self.world_obj = bpy.data.objects.new(world_obj_name, None)
+        bpy.context.scene.collection.objects.link(self.world_obj)
 
         demo_cam = bpy.data.cameras.new(name="demo_cam")
         demo_cam.lens = 18.0
         self._demo_cam_obj = bpy.data.objects.new(name="demo_cam", object_data=demo_cam)
         bpy.context.scene.collection.objects.link(self._demo_cam_obj)
-        self._demo_cam_obj.parent = self._world_obj
+        self._demo_cam_obj.parent = self.world_obj
 
     @functools.lru_cache(1024)
     def _leaf_from_pos(self, pos):
@@ -219,10 +220,12 @@ class ObjectManager:
         self._model_paths = model_paths
 
         map_path = self._model_paths[0]
+        logger.info('Parsing bsp %s', map_path)
         b = bsp.Bsp(self._fs.open(map_path))
         map_name = re.match(r"maps/([a-zA-Z0-9_]+).bsp", map_path).group(1)
+        logger.info('Adding bsp %s', map_path)
         self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
-        self._bb.map_obj.parent = self._world_obj
+        self._bb.map_obj.parent = self.world_obj
 
     def _path_to_model_name(self, mdl_path):
         m = re.match(r"progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
@@ -247,7 +250,7 @@ class ObjectManager:
                                 skin,
                                 self._config['models'],
                                 static_pose_num=frame)
-        bm.obj.parent = self._world_obj
+        bm.obj.parent = self.world_obj
         bm.obj.location = origin
         bm.obj.rotation_euler = (0., 0., angles[1])
 
@@ -255,20 +258,25 @@ class ObjectManager:
         self._static_object_leaves.append(self._leaf_from_pos(origin))
 
     def _create_managed_object(self, entity_num, model_num, skin_num):
-        model_path = self._model_paths[model_num - 1]
-        if model_path.startswith('*'):
+        model_path = self._model_paths[model_num - 1] if model_num != 0 else None
+
+        if model_num == 0:
+            # Used to make objects disappear, eg. player at the end of the level
+            managed_obj = NullManagedObject(self._fps)
+        elif model_path.startswith('*'):
             map_model_idx = int(model_path[1:])
             managed_obj = BspModelManagedObject(self._fps, self._bb.model_objs[map_model_idx])
         elif model_path.endswith('.mdl'):
             am = self._load_alias_model(model_path)
-            model_name = self._path_to_model_name(model_path),
+            model_name = self._path_to_model_name(model_path)
+            logger.info('Loading alias model %s', model_name)
             bm = blendmdl.add_model(am,
                                     self._pal,
                                     model_name,
                                     f'ent{entity_num}_{model_name}',
                                     skin_num,
                                     self._config['models'])
-            bm.obj.parent = self._world_obj
+            bm.obj.parent = self.world_obj
             managed_obj = AliasModelManagedObject(self._fps, bm)
         else:
             managed_obj = NullManagedObject(self._fps)
@@ -346,6 +354,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
     prev_updated = None
     demo_done = False
     obj_mgr = ObjectManager(fs, config, fps, world_obj_name, load_level)
+    last_time = 0.
 
     msg_iter = proto.read_demo_file(demo_file)
 
@@ -368,9 +377,6 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 if time is not None:
                     raise Exception("Multiple time messages per update")
                 time = parsed.time
-                if time >= 2:
-                    demo_done = True
-                    break
 
             if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
                 obj_mgr.set_model_paths(parsed.models)
@@ -402,9 +408,12 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 updated.add(parsed.entity_num)
 
         if time is not None and entities and not demo_done:
-            print(time)
+            logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
+            last_time = time
         prev_updated = updated
 
-    obj_mgr.done(time)
+    obj_mgr.done(last_time)
+
+    return obj_mgr.world_obj
 

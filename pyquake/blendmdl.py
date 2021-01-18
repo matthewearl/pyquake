@@ -43,20 +43,21 @@ class BlendMdl:
     _last_time: Optional[float] = None
 
     def _update_pose(self, time: float, pose_num: int, fps: float):
-        for sub_obj, shape_keys in zip(self.sub_objs, self._shape_keys):
-            blender_frame = int(round(fps * time))
-            if self._current_pose_num is not None:
-                shape_keys[self._current_pose_num].value = 0
-                shape_keys[self._current_pose_num].keyframe_insert('value', frame=blender_frame)
-                last_blender_frame = int(round(fps * self._last_time))
-                shape_keys[pose_num].value = 0
-                shape_keys[pose_num].keyframe_insert('value', frame=last_blender_frame)
+        if self._current_pose_num is None or self._current_pose_num != pose_num:
+            for sub_obj, shape_keys in zip(self.sub_objs, self._shape_keys):
+                blender_frame = int(round(fps * time))
+                if self._current_pose_num is not None:
+                    shape_keys[self._current_pose_num].value = 0
+                    shape_keys[self._current_pose_num].keyframe_insert('value', frame=blender_frame)
+                    last_blender_frame = int(round(fps * self._last_time))
+                    shape_keys[pose_num].value = 0
+                    shape_keys[pose_num].keyframe_insert('value', frame=last_blender_frame)
 
-            shape_keys[pose_num].value = 1
-            shape_keys[pose_num].keyframe_insert('value', frame=blender_frame)
+                shape_keys[pose_num].value = 1
+                shape_keys[pose_num].keyframe_insert('value', frame=blender_frame)
 
-        self._current_pose_num = pose_num
-        self._last_time = time
+            self._current_pose_num = pose_num
+            self._last_time = time
 
     def add_pose_keyframe(self, pose_num: int, time: float, fps: float):
         if self._group_pose_num is not None:
@@ -67,7 +68,7 @@ class BlendMdl:
         if self._group_pose_num is not None:
             loop_time = 0
             while loop_time < final_time:
-                for pose_num, offset in enumerate(self._times[:-1]):
+                for pose_num, offset in enumerate([0] + self._times[:-1]):
                     self._update_pose(loop_time + offset, pose_num, fps)
                 loop_time += self._times[-1]
 
@@ -144,7 +145,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdls_cfg, static_pose_num=N
                 raise Exception(f"Frame type {frame.frame_type} not supported for non-static models")
     else:
         group_frame = am.frames[static_pose_num]
-        group_times = group_frame.times
+        group_times = list(group_frame.times)
         if group_frame.frame_type != mdl.FrameType.GROUP:
             raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
 
