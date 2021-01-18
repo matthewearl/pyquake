@@ -153,6 +153,14 @@
                 "*lava1": {
                     "strength": 500,
                     "sample_as_light": false
+                },
+                "metal6_3": {
+                    "strength": 50,
+                    "sample_as_light": true
+                },
+                "rune_a": {
+                    "strength": 50,
+                    "sample_as_light": true
                 }
             }
         },

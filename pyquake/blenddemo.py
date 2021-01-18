@@ -110,6 +110,9 @@ class ManagedObject:
     def add_angles_keyframe(self, angles: Vec3, time: float):
         raise NotImplementedError
 
+    def done(self, final_time: float):
+        raise NotImplementedError
+
 
 @dataclass
 class AliasModelManagedObject(ManagedObject):
@@ -119,8 +122,8 @@ class AliasModelManagedObject(ManagedObject):
         self.bm.add_pose_keyframe(pose_num, time, self.fps)
 
     def add_visible_keyframe(self, visible: bool, time: float):
-        blender_frame = self.get_blender_frame(time)
-        for sub_obj in self.sub_objs:
+        blender_frame = self._get_blender_frame(time)
+        for sub_obj in self.bm.sub_objs:
             sub_obj.hide_render = not visible
             sub_obj.keyframe_insert('hide_render', frame=blender_frame)
             sub_obj.hide_viewport = not visible
@@ -137,6 +140,9 @@ class AliasModelManagedObject(ManagedObject):
             self.bm.obj.rotation_euler.z = time * 100. * np.pi / 180
         self.bm.obj.keyframe_insert('rotation_euler', frame=self._get_blender_frame(time))
 
+    def done(self, final_time: float):
+        self.bm.done(final_time, self.fps)
+
 
 @dataclass
 class BspModelManagedObject(ManagedObject):
@@ -149,12 +155,14 @@ class BspModelManagedObject(ManagedObject):
         pass
 
     def add_origin_keyframe(self, origin: Vec3, time: float):
-        self.obj.location = location
+        self.obj.location = origin
         self.obj.keyframe_insert('location', frame=self._get_blender_frame(time))
 
     def add_angles_keyframe(self, angles: Vec3, time: float):
-        self.obj.rotation_euler = location
-        self.obj.keyframe_insert('rotation_euler', frame=self._get_blender_frame(time))
+        pass
+
+    def done(self, final_time: float):
+        pass
 
 
 @dataclass
@@ -171,6 +179,8 @@ class NullManagedObject(ManagedObject):
     def add_angles_keyframe(self, angles: Vec3, time: float):
         pass
 
+    def done(self, final_time: float):
+        pass
 
 class ObjectManager:
     def __init__(self, fs, config, fps, world_obj_name='demo', load_level=True):
@@ -270,7 +280,7 @@ class ObjectManager:
 
         # Hide any objects that weren't updated in this frame, or whose model changed.
         for entity_num in prev_updated:
-            if (prev_entities[entity_num].model_num != entities[entity_num.model_num]
+            if (prev_entities[entity_num].model_num != entities[entity_num].model_num
                     or entity_num not in updated):
                 self._objs[entity_num, prev_entities[entity_num].model_num].add_visible_keyframe(
                     False, time
@@ -281,11 +291,11 @@ class ObjectManager:
             ent = entities[entity_num]
             model_num = entities[entity_num].model_num
             key = entity_num, model_num
-            if key not in self._model_paths:
+            if key not in self._objs:
                 obj = self._create_managed_object(entity_num, model_num, ent.skin)
-                self._objs[entity_num, model_num] = obj
+                self._objs[key] = obj
             else:
-                obj = self._objs[entity_num, model_num]
+                obj = self._objs[key]
 
             # Update position / rotation / pose
             obj.add_origin_keyframe(ent.origin, time)
@@ -322,6 +332,9 @@ class ObjectManager:
         for bm in self._static_objects:
             bm.done(final_time, self._fps)
 
+        for obj in self._objs.values():
+            obj.done(final_time)
+
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
              load_level=True, relative_time=False):
@@ -355,8 +368,9 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 if time is not None:
                     raise Exception("Multiple time messages per update")
                 time = parsed.time
-                if time >= 5:
-                    return
+                if time >= 2:
+                    demo_done = True
+                    break
 
             if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
                 obj_mgr.set_model_paths(parsed.models)
@@ -387,6 +401,10 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 entities[parsed.entity_num] = prev_info.update(parsed, baseline)
                 updated.add(parsed.entity_num)
 
-        if entities:
+        if time is not None and entities and not demo_done:
+            print(time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
         prev_updated = updated
+
+    obj_mgr.done(time)
+

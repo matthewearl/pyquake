@@ -48,10 +48,6 @@ class BlendMdl:
             if self._current_pose_num is not None:
                 shape_keys[self._current_pose_num].value = 0
                 shape_keys[self._current_pose_num].keyframe_insert('value', frame=blender_frame)
-
-                fcurve = sub_obj.data.shape_keys.animation_data.action.fcurves[self._current_pose_num]
-                fcurve.keyframe_points[-1].interpolation = 'LINEAR'
-
                 last_blender_frame = int(round(fps * self._last_time))
                 shape_keys[pose_num].value = 0
                 shape_keys[pose_num].keyframe_insert('value', frame=last_blender_frame)
@@ -59,21 +55,13 @@ class BlendMdl:
             shape_keys[pose_num].value = 1
             shape_keys[pose_num].keyframe_insert('value', frame=blender_frame)
 
-            fcurve = sub_obj.data.shape_keys.animation_data.action.fcurves[pose_num]
-            fcurve.keyframe_points[-2].interpolation = 'LINEAR'
-            fcurve.keyframe_points[-1].interpolation = 'LINEAR'
-
-            self._current_pose_num = pose_num
-
-        for c in obj.data.shape_keys.animation_data.action.fcurves:
-            c.keyframe_points[-1].interpolation = 'LINEAR'
+        self._current_pose_num = pose_num
+        self._last_time = time
 
     def add_pose_keyframe(self, pose_num: int, time: float, fps: float):
         if self._group_pose_num is not None:
             raise Exception("Cannot key-frame static models")
         self._update_pose(time, pose_num, fps)
-
-        self._last_time = time
 
     def done(self, final_time: float, fps: float):
         if self._group_pose_num is not None:
@@ -82,6 +70,11 @@ class BlendMdl:
                 for pose_num, offset in enumerate(self._times[:-1]):
                     self._update_pose(loop_time + offset, pose_num, fps)
                 loop_time += self._times[-1]
+
+        for sub_obj in self.sub_objs:
+            for c in sub_obj.data.shape_keys.animation_data.action.fcurves:
+                for kfp in c.keyframe_points:
+                    kfp.interpolation = 'LINEAR'
 
 
 def _set_uvs(mesh, am, tri_set):
