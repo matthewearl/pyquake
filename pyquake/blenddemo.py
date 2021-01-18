@@ -301,6 +301,7 @@ class ObjectManager:
             key = entity_num, model_num
             if key not in self._objs:
                 obj = self._create_managed_object(entity_num, model_num, ent.skin)
+                obj.add_visible_keyframe(False, 0)
                 self._objs[key] = obj
             else:
                 obj = self._objs[key]
