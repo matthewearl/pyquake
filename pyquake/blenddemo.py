@@ -322,8 +322,8 @@ class ObjectManager:
 
         # Set sample_as_light materials.
         view_origin = entities[self._view_entity_num].origin
-        self._bb.set_visible_sample_as_light(view_origin, bounces=1)
-        vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=1)
+        self._bb.set_visible_sample_as_light(view_origin, bounces=2)
+        vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=2)
         for bm, leaf in zip(self._static_objects, self._static_object_leaves):
             is_vis = leaf in vis_leaves
             for mat in bm.sample_as_light_mats:

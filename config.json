@@ -12,6 +12,10 @@
         "flame2": {
             "sample_as_light": true,
             "strength": 10000
+        },
+        "lavaball": {
+            "sample_as_light": false,
+            "strength": 500
         }
     },
     "maps": {
