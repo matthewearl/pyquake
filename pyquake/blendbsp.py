@@ -407,6 +407,22 @@ class BlendBsp(NamedTuple):
                 self.fullbright_objects[face].keyframe_insert('hide_render', frame=frame)
 
 
+def _add_lights(lights_cfg, map_obj):
+    for obj_name, light_cfg in lights_cfg.items():
+        print('adding light', obj_name, light_cfg)
+        data = bpy.data.lights.new(name=obj_name, type=light_cfg['type'])
+        obj = bpy.data.objects.new(name=obj_name, object_data=data)
+        data.energy = light_cfg['energy']
+        data.color = light_cfg['color']
+        obj.location = light_cfg['location']
+        obj.rotation_euler = light_cfg['rotation']
+        obj.parent = map_obj
+
+        if obj_name == 'SUN':
+            data.angle = light_cfg['angle']
+        bpy.context.collection.objects.link(obj)
+
+
 def load_bsp(pak_root, map_name, config):
     fs = pak.Filesystem(pak_root)
     fname = 'maps/{}.bsp'.format(map_name)
@@ -449,5 +465,7 @@ def add_bsp(bsp, pal, map_name, config):
         leaf_to_mats = mat_applier.leaf_to_mats
     else:
         leaf_to_mats = None
+
+    _add_lights(map_cfg.get('lights', {}), map_obj)
 
     return BlendBsp(bsp, map_obj, model_objs, fullbright_objects, leaf_to_mats)

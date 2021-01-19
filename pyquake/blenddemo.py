@@ -205,7 +205,7 @@ class ObjectManager:
         bpy.context.scene.collection.objects.link(self.world_obj)
 
         demo_cam = bpy.data.cameras.new(name="demo_cam")
-        demo_cam.lens = 18.0
+        demo_cam.lens = 11.0
         self._demo_cam_obj = bpy.data.objects.new(name="demo_cam", object_data=demo_cam)
         bpy.context.scene.collection.objects.link(self._demo_cam_obj)
         self._demo_cam_obj.parent = self.world_obj
@@ -323,6 +323,7 @@ class ObjectManager:
         # Set sample_as_light materials.
         view_origin = entities[self._view_entity_num].origin
         self._bb.set_visible_sample_as_light(view_origin, bounces=2)
+        self._bb.insert_sample_as_light_visibility_keyframe(blender_frame)
         vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=2)
         for bm, leaf in zip(self._static_objects, self._static_object_leaves):
             is_vis = leaf in vis_leaves
@@ -332,6 +333,7 @@ class ObjectManager:
 
         # Pose camera
         self._demo_cam_obj.location = view_origin
+        self._demo_cam_obj.location.z += 22
         self._demo_cam_obj.keyframe_insert('location', frame=blender_frame)
         self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
         self._demo_cam_obj.keyframe_insert('rotation_euler', frame=blender_frame)

@@ -160,11 +160,23 @@
                 },
                 "metal6_3": {
                     "strength": 50,
+                    "overlay": true,
                     "sample_as_light": true
                 },
                 "rune_a": {
                     "strength": 50,
+                    "overlay": true,
                     "sample_as_light": true
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 1.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [0.440, 0.069, 0],
+                    "location": [0, 0, 0]
                 }
             }
         },
