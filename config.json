@@ -15,7 +15,7 @@
         },
         "lavaball": {
             "sample_as_light": false,
-            "strength": 500
+            "strength": 100
         }
     },
     "maps": {
@@ -155,7 +155,7 @@
                     "sample_as_light": false
                 },
                 "*lava1": {
-                    "strength": 500,
+                    "strength": 100,
                     "sample_as_light": false
                 },
                 "metal6_3": {
@@ -177,6 +177,31 @@
                     "angle": 0.087,
                     "rotation": [0.440, 0.069, 0],
                     "location": [0, 0, 0]
+                },
+                "light2": {
+                    "type": "POINT",
+                    "location": [520.0, 904.0, 272.0],
+                    "energy": 100.0
+                },
+                "light15": {
+                    "type": "POINT",
+                    "location": [192.0, 864, 16.6],
+                    "energy": 10.0
+                },
+                "light117": {
+                    "type": "POINT",
+                    "location": [480.0, 504.0, 80.0],
+                    "energy": 50.0
+                },
+                "light171": {
+                    "type": "POINT",
+                    "location": [672.0, 288.0, 0.0],
+                    "energy": 10.0
+                },
+                "light176": {
+                    "type": "POINT",
+                    "location": [480.0, 920.0, 104.0],
+                    "energy": 50.0
                 }
             }
         },

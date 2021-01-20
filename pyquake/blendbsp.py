@@ -409,18 +409,17 @@ class BlendBsp(NamedTuple):
 
 def _add_lights(lights_cfg, map_obj):
     for obj_name, light_cfg in lights_cfg.items():
-        print('adding light', obj_name, light_cfg)
         data = bpy.data.lights.new(name=obj_name, type=light_cfg['type'])
         obj = bpy.data.objects.new(name=obj_name, object_data=data)
         data.energy = light_cfg['energy']
-        data.color = light_cfg['color']
+        data.color = light_cfg.get('color', (1, 1, 1))
         obj.location = light_cfg['location']
-        obj.rotation_euler = light_cfg['rotation']
+        obj.rotation_euler = light_cfg.get('rotation', (0, 0, 0))
         obj.parent = map_obj
 
-        if obj_name == 'SUN':
+        if light_cfg['type'] == 'SUN':
             data.angle = light_cfg['angle']
-        bpy.context.collection.objects.link(obj)
+        bpy.context.scene.collection.objects.link(obj)
 
 
 def load_bsp(pak_root, map_name, config):
