@@ -86,6 +86,7 @@ class Simplex(NamedTuple):
 
         delta = -B[:, -1] / B[:, free_idx]
         delta[delta < 0] = np.inf
+        delta[np.isnan(delta)] = np.inf
         basic_idx = np.argmin(delta)
 
         # pivot
