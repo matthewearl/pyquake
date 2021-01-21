@@ -92,7 +92,7 @@ class Simplex(NamedTuple):
         new_basic_mask = self.basic_mask.copy()
         new_basic_mask[np.where(~self.basic_mask)[0][free_idx]] = True
         new_basic_mask[np.where(self.basic_mask)[0][basic_idx]] = False
-        
+
         return Simplex(self.dim, self.constraints, new_basic_mask)
 
     def iterate(self, c):
@@ -194,3 +194,12 @@ class Simplex(NamedTuple):
         new_constraints = np.concatenate([s.constraints, p[None, :]])
         new_basic_mask = np.concatenate([s.basic_mask, [True]])
         return Simplex(self.dim, new_constraints, new_basic_mask)
+
+    def simplify(self):
+        # Remove constraints which do not affect the feasible solution.
+        reachable = np.full(len(self.constraints), False)
+        for idxs, pos in self.find_verts():
+            for idx in idxs:
+                reachable[idx] = True
+        return Simplex(self.dim, self.constraints[reachable], self.basic_mask[reachable])
+
