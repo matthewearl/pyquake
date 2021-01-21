@@ -87,6 +87,14 @@ class Node(NamedTuple):
         else:
             return self.bsp.nodes[self.child_ids[child_num]]
 
+    @property
+    def leaves(self):
+        for child_num in range(2):
+            if self.child_is_leaf(child_num):
+                yield self.get_child(child_num)
+            else:
+                yield from self.get_child(child_num).leaves
+
     def _get_childs_leaves_from_simplex(self, child_num: int, sx: simplex.Simplex) -> Iterable["Leaf"]:
         if self.child_is_leaf(child_num):
             l = self.get_child(child_num)
@@ -110,6 +118,16 @@ class Node(NamedTuple):
             yield from self._get_childs_leaves_from_simplex(0, infront_sx)
             behind_sx = sx.add_constraint(-p)
             yield from self._get_childs_leaves_from_simplex(1, behind_sx)
+
+    def _generate_leaf_paths(self):
+        for child_num in range(2):
+            if self.child_is_leaf(child_num):
+                leaf = self.get_child(child_num)
+                yield leaf, [child_num]
+            else:
+                child_node = self.get_child(child_num)
+                for leaf, path in child_node._generate_leaf_paths():
+                    yield leaf, [child_num] + path
 
 
 class Leaf(NamedTuple):
@@ -159,6 +177,19 @@ class Leaf(NamedTuple):
 
     def __eq__(self, other):
         return id(self) == id(other)
+
+    @property
+    @functools.lru_cache(None)
+    def simplex(self):
+        model = self.bsp._leaf_to_model[self]
+        path = self.bsp._leaf_to_path[self]
+        node = model.node
+        sx = simplex.Simplex.from_bbox(node.bbox.mins, node.bbox.maxs)
+        for child_num in path:
+            p = np.concatenate([node.plane.normal, [-node.plane.dist]])
+            sx = sx.add_constraint(p if child_num == 0 else -p)
+            node = node.get_child(child_num)
+        return sx
 
 
 class Face(NamedTuple):
@@ -282,12 +313,27 @@ class Model(NamedTuple):
     def node(self):
         return self.bsp.nodes[self.node_id]
 
+    def get_simplex_from_point(self, point):
+        sx = simplex.Simplex.from_bbox(self.node.bbox.mins, self.node.bbox.maxs)
+        point = np.array(point)
+        node = self.node
+        while True:
+            plane = node.plane
+            child_num = 0 if _infront(point, plane.normal, plane.dist) else 1
+            p = np.concatenate([plane.normal, [-plane.dist]])
+            sx = sx.add_constraint(p if child_num == 0 else -p)
+            if node.child_is_leaf(child_num):
+                break
+            node = node.get_child(child_num)
+
+        return sx, node.get_child(child_num)
+
     def get_leaf_from_point(self, point):
         point = np.array(point)
         node = self.node
         while True:
             child_num = 0 if _infront(point, node.plane.normal, node.plane.dist) else 1
-            child = node.get_child(child_num) 
+            child = node.get_child(child_num)
             if node.child_is_leaf(child_num):
                 return child
             node = child
@@ -332,6 +378,16 @@ class Bsp:
     @functools.lru_cache(None)
     def _face_to_leaf(self):
         return {face: leaf for leaf in self.leaves for face in leaf.faces}
+
+    @property
+    @functools.lru_cache(None)
+    def _leaf_to_model(self):
+        return {leaf: model for model in self.models for leaf in model.node.leaves}
+
+    @property
+    @functools.lru_cache(None)
+    def _leaf_to_path(self):
+        return {leaf: path for m in self.models for leaf, path in m.node._generate_leaf_paths()}
 
     def _read(self, f, n):
         b = f.read(n)
