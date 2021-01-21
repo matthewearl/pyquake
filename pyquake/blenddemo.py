@@ -418,5 +418,5 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
 
     obj_mgr.done(last_time)
 
-    return obj_mgr.world_obj
+    return obj_mgr.world_obj, obj_mgr
 

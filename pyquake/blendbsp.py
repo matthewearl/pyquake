@@ -406,6 +406,16 @@ class BlendBsp(NamedTuple):
             if face in self.fullbright_objects:
                 self.fullbright_objects[face].keyframe_insert('hide_render', frame=frame)
 
+    def add_leaf_mesh(self, pos, obj_name='leaf_simplex'):
+        leaf = self.bsp.models[0].get_leaf_from_point(pos)
+        verts, faces = leaf.simplex.to_mesh()
+
+        mesh = bpy.data.meshes.new(obj_name)
+        mesh.from_pydata(verts, [], faces)
+        obj = bpy.data.objects.new(obj_name, mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.parent = self.map_obj
+
 
 def _add_lights(lights_cfg, map_obj):
     for obj_name, light_cfg in lights_cfg.items():
