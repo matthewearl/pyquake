@@ -1,0 +1,137 @@
+# Demo to blender scene converter
+
+This repo contains utilities for converting Quake demo files (.dem) into blender
+scenes.  Tested with Blender 2.90.1
+
+## Setup
+
+Setup is complicated by the fact that we need to be able to import external
+libraries into blender's Python path. To do this you'll need a Python virtualenv
+installed on your machine.  The Python binary that the virtualenv uses needs to
+be the same minor version as Blender's (ie. 3.7.x if using Blender 2.90.1).
+
+On Linux one way to achieve this is by using
+[virtualenvwrapper](https://virtualenvwrapper.readthedocs.io/en/latest/) on the
+Python binary distributed with Blender:
+
+```
+mkvirtualenv blendquake -p ~/blender-2.90.1-linux64/2.90/python/bin/python3.7m
+workon blendquake
+```
+
+Once activated, checkout this repo, `cd` into it, and `pip install -e . -v` to
+install the repo in development mode
+
+Next, start Blender.  From an empty scene, open the text editor, create a new
+script, and paste in the following code:
+
+```
+# Setup path.  Change the paths here to point to your virtualenv's
+# site-packages, and your local pyquake install.
+from os.path import expanduser
+import sys
+
+for x in [
+     '~/.virtualenvs/blendquake/lib/python3.7/site-packages',
+     '~/pyquake',
+      ]:
+    if x not in sys.path:
+        sys.path.append(expanduser(x))
+
+
+# Import everything, and reload modules that we're likely to change>
+import importlib
+import logging
+import json
+import pyquake.blenddemo
+import pyquake.blendmdl
+import pyquake.blendbsp
+from pyquake import pak
+
+importlib.reload(pyquake.blendbsp)
+importlib.reload(pyquake.blendmdl)
+blenddemo = importlib.reload(pyquake.blenddemo)
+
+# Log messages should appear on the terminal running blender
+logging.getLogger().setLevel(logging.INFO)
+
+# Settings for setting texture brightnesses, etc.
+with open(expanduser('~/pyquake/config.json')) as f:
+  config = json.load(f)
+
+# Directory containing id0.pak
+fs = pak.Filesystem(expanduser('~/.quakespasm/id1'))
+
+# Demo file to load
+demo_fname = expanduser('~/Downloads/e1m6_conny.dem')
+
+with open(demo_fname, 'rb') as demo_file:
+    world_obj = blenddemo.add_demo(demo_file, fs, config, fps=360)
+
+world_obj.scale = (0.01,) * 3
+
+```
+
+Change paths to point to the correct places, and execute.  Log messages
+should start appearing on the terminal and after a few seconds the loaded demo
+should appear.
+
+The above produces a root `demo` empty, under which the various other entities
+appear.
+
+
+## Activating the demo camera
+
+Click on the camera icon next to the demo_cam object in the outliner to make the
+current camera the first person view.  You'll be able to see parts of the player
+model from this point of view, so you'll likely want to make them invisible to
+camera rays.  To do this, select each of the objects under the `ent1_player`
+empty, and disable camera ray visibility under the Visibility settings on the
+Object Properties tab.
+
+You can use other cameras, however this may introduce extra noise since
+emitters' sample_as_light (aka Multiple Importance Sampling) property is
+keyframed according to the player's position, to avoid sampling distant lights.
+
+
+## Setting the correct framerate
+
+Blender only allows keyframes to be set on integer frame numbers.  Quake
+typically operates at 72 frames per second, so to avoid jerky motion the
+framerate needs to be a multiple of 72.  If you want an output framerate of
+60fps, select a custom framerate of 360 in the Dimensions section of Output
+Properties, and then set the Step setting to 6.   360 is chosen since it's the
+lowest common multiple of 72 and 60, and 6 is chosen since 360 divided by 6
+gives the desired framerate.
+
+
+## Config file
+
+The `config.json` referred to above has a number of settings that can be
+changed:
+
+- `models.<name>.force_fullbright`: Make the whole model an emitter,
+  otherwise just those parts of the texture that are in the fullbright palette
+  will be.
+- `models.<name>.strength`: Brightness of the emitter.
+- `models.<name>.sample_as_light`: Whether to set the `sample_as_light` (aka
+  multiple importance sampling) flag on the material.
+- `maps.<name>.fullbright_object_overlay`: Separate out fullbright regions of
+  textures with the `overlay` flag set into their own objects.  This is to make
+  multiple importance sampling more efficient, since a large object with a small
+  fullbright area will be sampled uniformly across the object.
+- `maps.<name>.textures.<name>.strength`:  Emission strength for fullbright
+  parts of the texture.
+- `maps.<name>.textures.<name>.tint`:  Emitted colours are multiplied by this
+  4-vector.  Use to tune light colour.
+- `maps.<name>.textures.<name>.overlay`: Enable / disable fullbright object
+  overlay for this texture.  See `maps.<name>.fullbright_object_overlay` for
+  details.
+- `maps.<name>.textures.<name>.sample_as_light`: Whether to set the
+  `sample_as_light` (aka multiple importance sampling) flag on the material.
+
+The `sample_as_light` flag for model and (static) object materials is set to
+False whenever the demo_cam is out of range of the light, according to the map's
+PVS data.  This is to avoid wasting samples on occluded lights.
+
+
