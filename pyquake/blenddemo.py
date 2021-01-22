@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 Vec3 = Tuple[float, float, float]
 
 
+_NEAR_CLIP_PLANE = 8
+_FAR_CLIP_PLANE = 2048
+
+
 def _patch_vec(old_vec: Vec3, update):
     return tuple(v if u is None else u for v, u in zip(old_vec, update))
 
@@ -61,6 +65,23 @@ def _fix_angles(old_angles, new_angles, degrees=False):
     i = old_yaw // 1
     j = np.argmin(np.abs(np.array([i - 1, i, i + 1]) + new_yaw - old_yaw))
     return (new_angles[0], (new_yaw + i + j - 1) * t, new_angles[2])
+
+
+def _quake_angles_to_mat(angles):
+    # Ported from mathlib.c AngleVectors
+    pitch = angles[0] * (np.pi / 180);
+    yaw = angles[1] * (np.pi / 180);
+    roll = angles[2] * (np.pi / 180);
+
+    sy, cy = sin(yaw), cos(yaw)
+    sp, cp = sin(pitch), cos(pitch)
+    sr, cr = sin(roll), cos(roll)
+
+    right = np.array([-1*sr*sp*cy + -1*cr*-sy, -1*sr*sp*sy + -1*cr*cy, -1*sr*cp])
+    forward = np.array([cp*cy, cp*sy, -sp])
+    up = np.array([cr*sp*cy + -sr*-sy, cr*sp*sy + -sr*cy, cr*cp])
+
+    return np.stack([right, forward, up], axis=1)
 
 
 @dataclass
@@ -184,7 +205,7 @@ class NullManagedObject(ManagedObject):
 
 
 class ObjectManager:
-    def __init__(self, fs, config, fps, world_obj_name='demo', load_level=True):
+    def __init__(self, fs, config, fps, fov, width, height, world_obj_name='demo', load_level=True):
         assert load_level, "Not yet supported"
 
         self._fs = fs
@@ -204,8 +225,13 @@ class ObjectManager:
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
 
+        self._width, self._height = width, height
+        bpy.data.scenes['Scene'].render.resolution_x = width
+        bpy.data.scenes['Scene'].render.resolution_y = height
+
+        self._fov = fov
         demo_cam = bpy.data.cameras.new(name="demo_cam")
-        demo_cam.lens = 11.0
+        demo_cam.angle = fov * np.pi / 180
         self._demo_cam_obj = bpy.data.objects.new(name="demo_cam", object_data=demo_cam)
         bpy.context.scene.collection.objects.link(self._demo_cam_obj)
         self._demo_cam_obj.parent = self.world_obj
@@ -283,6 +309,55 @@ class ObjectManager:
 
         return managed_obj
 
+    def _view_simplex(self, view_origin, view_angles):
+        aspect_ratio = self._width / self._height
+        if aspect_ratio > 1:
+            h_tan = np.tan(0.5 * fov)
+            v_tan = h_tan / aspect_ratio
+        else:
+            v_tan = np.tan(0.5 * fov)
+            h_tan = v_tan * aspect_ratio
+
+        constraints = np.array([
+            [-1, h_tan, 0, 0],                  # right
+            [1, h_tan, 0, 0],                   # left
+            [0, v_tan, 1, 0],                   # bottom
+            [0, v_tan, -1, 0],                  # top
+            [0, 1, 0, 0, -_NEAR_CLIP_PLANE],    # near
+            [0, -1, 0, 0, _FAR_CLIP_PLANE],     # far
+        ])
+        constraints[:, :3] /= np.linalg.norm(constraints[:, :3], axis=1)[:, None]
+
+        rotation_matrix = _quake_angles_to_mat(view_angles)
+        constraints[:, :3] = constraints[:, :3] @ rotation_matrix.T
+        constraints[:, 3] -= np.einsum('ij,j->i', constraints[:, :3], view_origin)
+
+        return simplex.Simplex(3, constraints, np.array([False, False, False, True, True, True]))
+
+    def _update_sample_as_light(self, view_origin, view_angles):
+        view_pvs = self._bb.bsp.get_leaf_from_point(view_origin)
+
+        view_sx = self._view_simplex(view_origin, view_angles)
+
+        for sal_obj in self._sample_as_light_objects:
+            pvs = view_pvs & set(sal.leaf.visible_leafs)
+
+            mins, maxs = sal_obj.bbox
+            sal_obj_bbox_sx = simplex.Simplex.from_bbox(
+                sal_obj.origin + mins,
+                sal_obj.origin + maxs,
+            )
+
+            vis = False
+            for leaf in pvs:
+                try:
+                    sx = leaf.simplex.intersect(sal_obj_bbox_sx).intersect(view_sx)
+                except simplex.Infeasible:
+                    pass
+                else:
+                    vis = True
+                    break
+
     def update(self, time, prev_entities, entities, prev_updated, updated, view_angles):
         blender_frame = int(round(self._fps * time))
 
@@ -348,7 +423,7 @@ class ObjectManager:
 
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
-             load_level=True, relative_time=False):
+             load_level=True, relative_time=False, fov=120):
     assert not relative_time, "Not yet supported"
 
     baseline_entities: Dict[int, _EntityInfo] = collections.defaultdict(lambda: _DEFAULT_BASELINE)
@@ -356,7 +431,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
     fixed_view_angles: Vec3 = (0, 0, 0)
     prev_updated = None
     demo_done = False
-    obj_mgr = ObjectManager(fs, config, fps, world_obj_name, load_level)
+    obj_mgr = ObjectManager(fs, config, fps, fov, world_obj_name, load_level)
     last_time = 0.
 
     msg_iter = proto.read_demo_file(demo_file)

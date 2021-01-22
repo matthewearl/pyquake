@@ -204,3 +204,9 @@ class Simplex(NamedTuple):
                 reachable[idx] = True
         return Simplex(self.dim, self.constraints[reachable], self.basic_mask[reachable])
 
+
+    def intersect(self, other):
+        s = self
+        for p in other.constraints:
+            s = s.add_constraint(p)
+        return s
