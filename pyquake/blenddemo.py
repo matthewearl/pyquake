@@ -32,7 +32,7 @@ import bpy
 import bpy_types
 import numpy as np
 
-from . import proto, bsp, mdl, blendmdl, blendbsp
+from . import proto, bsp, mdl, blendmdl, blendbsp, simplex
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ Vec3 = Tuple[float, float, float]
 
 _NEAR_CLIP_PLANE = 8
 _FAR_CLIP_PLANE = 2048
+_EYE_HEIGHT = 22
 
 
 def _patch_vec(old_vec: Vec3, update):
@@ -73,9 +74,9 @@ def _quake_angles_to_mat(angles):
     yaw = angles[1] * (np.pi / 180);
     roll = angles[2] * (np.pi / 180);
 
-    sy, cy = sin(yaw), cos(yaw)
-    sp, cp = sin(pitch), cos(pitch)
-    sr, cr = sin(roll), cos(roll)
+    sy, cy = np.sin(yaw), np.cos(yaw)
+    sp, cp = np.sin(pitch), np.cos(pitch)
+    sr, cr = np.sin(roll), np.cos(roll)
 
     right = np.array([-1*sr*sp*cy + -1*cr*-sy, -1*sr*sp*sy + -1*cr*cy, -1*sr*cp])
     forward = np.array([cp*cy, cp*sy, -sp])
@@ -310,29 +311,33 @@ class ObjectManager:
         return managed_obj
 
     def _view_simplex(self, view_origin, view_angles):
+        view_origin = np.array(view_origin)
+        view_origin[2] += _EYE_HEIGHT
+
         aspect_ratio = self._width / self._height
+        tan_fov = np.tan(0.5 * self._fov * np.pi / 180)
         if aspect_ratio > 1:
-            h_tan = np.tan(0.5 * fov)
+            h_tan = tan_fov
             v_tan = h_tan / aspect_ratio
         else:
-            v_tan = np.tan(0.5 * fov)
+            v_tan = tan_fov
             h_tan = v_tan * aspect_ratio
 
         constraints = np.array([
-            [-1, h_tan, 0, 0],                  # right
-            [1, h_tan, 0, 0],                   # left
-            [0, v_tan, 1, 0],                   # bottom
-            [0, v_tan, -1, 0],                  # top
-            [0, 1, 0, 0, -_NEAR_CLIP_PLANE],    # near
-            [0, -1, 0, 0, _FAR_CLIP_PLANE],     # far
+            [-1, h_tan, 0, 0],               # right
+            [1, h_tan, 0, 0],                # left
+            [0, v_tan, 1, 0],                # bottom
+            [0, v_tan, -1, 0],               # top
+            [0, 1, 0, -_NEAR_CLIP_PLANE],    # near
+            [0, -1, 0, _FAR_CLIP_PLANE],     # far
         ])
-        constraints[:, :3] /= np.linalg.norm(constraints[:, :3], axis=1)[:, None]
 
+        constraints[:, :3] /= np.linalg.norm(constraints[:, :3], axis=1)[:, None]
         rotation_matrix = _quake_angles_to_mat(view_angles)
         constraints[:, :3] = constraints[:, :3] @ rotation_matrix.T
         constraints[:, 3] -= np.einsum('ij,j->i', constraints[:, :3], view_origin)
 
-        return simplex.Simplex(3, constraints, np.array([False, False, False, True, True, True]))
+        return simplex.Simplex(3, constraints, np.array([False, True, False, True, False, True]))
 
     def _update_sample_as_light(self, view_origin, view_angles):
         view_pvs = self._bb.bsp.get_leaf_from_point(view_origin)
@@ -408,7 +413,7 @@ class ObjectManager:
 
         # Pose camera
         self._demo_cam_obj.location = view_origin
-        self._demo_cam_obj.location.z += 22
+        self._demo_cam_obj.location.z += _EYE_HEIGHT
         self._demo_cam_obj.keyframe_insert('location', frame=blender_frame)
         self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
         self._demo_cam_obj.keyframe_insert('rotation_euler', frame=blender_frame)
@@ -423,7 +428,7 @@ class ObjectManager:
 
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
-             load_level=True, relative_time=False, fov=120):
+             load_level=True, relative_time=False, fov=120, width=1920, height=1080):
     assert not relative_time, "Not yet supported"
 
     baseline_entities: Dict[int, _EntityInfo] = collections.defaultdict(lambda: _DEFAULT_BASELINE)
@@ -431,7 +436,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
     fixed_view_angles: Vec3 = (0, 0, 0)
     prev_updated = None
     demo_done = False
-    obj_mgr = ObjectManager(fs, config, fps, fov, world_obj_name, load_level)
+    obj_mgr = ObjectManager(fs, config, fps, fov, width, height, world_obj_name, load_level)
     last_time = 0.
 
     msg_iter = proto.read_demo_file(demo_file)
