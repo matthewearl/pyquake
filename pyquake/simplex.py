@@ -85,6 +85,7 @@ class Simplex(NamedTuple):
         B = self.constraints[self.basic_mask] @ self.vert_to_world
 
         delta = -B[:, -1] / B[:, free_idx]
+        delta[B[:, free_idx] >= 0] = np.inf
         delta[delta < 0] = np.inf
         delta[np.isnan(delta)] = np.inf
         basic_idx = np.argmin(delta)
@@ -100,7 +101,7 @@ class Simplex(NamedTuple):
         # Transform the optimization axis similarly, select an edge to traverse.
         c = c @ self.vert_to_world[:self.dim, :self.dim]
         for free_idx in range(self.dim):
-            if c[free_idx] > 0:
+            if c[free_idx] > 1e-5:
                 break
         else:
             raise AlreadyOptimal
