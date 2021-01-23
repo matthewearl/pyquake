@@ -413,21 +413,23 @@ class ObjectManager:
         for sal_obj in self._sample_as_light_objects:
             pvs = view_pvs & set(sal_obj.leaf.visible_leaves)
 
-            mins, maxs = sal_obj.bbox
-            sal_obj_bbox_sx = simplex.Simplex.from_bbox(
-                sal_obj.origin + mins,
-                sal_obj.origin + maxs,
-            )
+            sal_bbox = sal_obj.origin + sal_obj.bbox
 
             vis = False
             for leaf in pvs:
-                try:
-                    sx = leaf.simplex.intersect(sal_obj_bbox_sx).intersect(view_sx)
-                except simplex.Infeasible:
-                    pass
-                else:
-                    vis = True
-                    break
+                leaf_bbox = np.array([leaf.bbox.mins, leaf.bbox.maxs])
+                bbox = np.stack([np.maximum(leaf.bbox.mins, sal_bbox[0]),
+                                 np.minimum(leaf.bbox.maxs, sal_bbox[1])])
+
+                if np.all(bbox[1] > bbox[0]):
+                    bbox_simplex = simplex.Simplex.from_bbox(*bbox)
+                    try:
+                        bbox_simplex.intersect(view_sx)
+                    except simplex.Infeasible:
+                        pass
+                    else:
+                        vis = True
+                        break
 
             sal_obj.add_keyframe(vis, blender_frame)
 
@@ -553,7 +555,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 updated.add(parsed.entity_num)
 
         if time is not None and entities and not demo_done:
-            if time > 2.7:
+            if time > 7:
                 break
             logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
