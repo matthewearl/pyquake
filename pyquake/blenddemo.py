@@ -26,7 +26,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import bpy
 import bpy_types
@@ -152,15 +152,11 @@ class AliasModelSampleAsLightObject:
 
     @property
     def bbox(self):
-        return self._bbox
+        return np.array(self._bm.obj.location) + self._bbox
 
     @property
     def leaf(self):
-        return self._bb.bsp.models[0].get_leaf_from_point(self.origin)
-
-    @property
-    def origin(self):
-        return np.array(self._bm.obj.location)
+        return self._bb.bsp.models[0].get_leaf_from_point(self._bm.obj.location)
 
     @property
     def mats(self):
@@ -170,6 +166,43 @@ class AliasModelSampleAsLightObject:
         for mat in self._bm.sample_as_light_mats:
             mat.cycles.sample_as_light = vis
             mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
+
+
+@dataclass
+class LeafSampleAsLightObject:
+    _leaf: bsp.Leaf
+    _mat: bpy.types.Material
+    _tex_cfg: Dict
+
+    @property
+    def bbox(self):
+        if "bbox" not in self._tex_cfg:
+            raise Exception("Sample as light textures must have bounding boxes")
+        tex_bbox = np.array(self._tex_cfg['bbox'])
+        return np.stack([self._leaf.bbox.mins - tex_bbox[0],
+                         self._leaf.bbox.maxs + tex_bbox[1]])
+
+    @property
+    def leaf(self):
+        return self._leaf
+
+    @property
+    def mats(self):
+        return [self._mat]
+
+    def add_keyframe(self, vis: bool, blender_frame: int):
+        self._mat.cycles.sample_as_light = vis
+        self._mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
+
+    @classmethod
+    def create_from_bsp(cls, bb: blendbsp.BlendBsp):
+        if bb.sample_as_light_info:
+            return (
+                cls(leaf, mat, tex_cfg)
+                for model, model_info in bb.sample_as_light_info.items()
+                for leaf, leaf_info in model_info.items()
+                for mat, tex_cfg in leaf_info.items()
+            )
 
 
 @dataclass
@@ -312,6 +345,10 @@ class ObjectManager:
         self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
         self._bb.map_obj.parent = self.world_obj
 
+        self._sample_as_light_objects.extend(
+            LeafSampleAsLightObject.create_from_bsp(self._bb)
+        )
+
     def _path_to_model_name(self, mdl_path):
         m = re.match(r"progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
         if m is None:
@@ -415,7 +452,7 @@ class ObjectManager:
         for sal_obj in self._sample_as_light_objects:
             pvs = view_pvs & set(sal_obj.leaf.visible_leaves)
 
-            sal_bbox = sal_obj.origin + sal_obj.bbox
+            sal_bbox = sal_obj.bbox
 
             vis = False
             for leaf in pvs:

@@ -162,12 +162,14 @@
                 "metal6_3": {
                     "strength": 50,
                     "overlay": true,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 },
                 "rune_a": {
                     "strength": 50,
                     "overlay": true,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 }
             },
             "lights": {

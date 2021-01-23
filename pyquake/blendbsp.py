@@ -70,7 +70,7 @@ class _MaterialApplier:
     def __init__(self, pal, map_cfg):
         self._pal = pal
         self._map_cfg = map_cfg
-        self.leaf_to_mats = collections.defaultdict(lambda: collections.defaultdict(set))
+        self.sample_as_light_info = collections.defaultdict(lambda: collections.defaultdict(dict))
 
     @functools.lru_cache(None)
     def _load_image(self, texture):
@@ -162,7 +162,7 @@ class _MaterialApplier:
             if self._get_sample_as_light(texture, mat_type):
                 # Use a different material for each leaf
                 mat = self._get_material(mat_type, texture, bsp_face.leaf)
-                self.leaf_to_mats[model][bsp_face.leaf].add(mat)
+                self.sample_as_light_info[model][bsp_face.leaf][mat] = tex_cfg
             else:
                 # Single material
                 mat = self._get_material(mat_type, texture, None)
@@ -346,65 +346,12 @@ def _load_object(model_id, model, map_name, mat_applier):
     return obj
 
 
-#def _get_model_leaves(model
-#
-
 class BlendBsp(NamedTuple):
     bsp: Bsp
     map_obj: bpy_types.Object
     model_objs: Dict[int, bpy_types.Object]
     fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
-    leaf_to_mats: Optional[Dict[Model, Dict[Leaf, Set[bpy.types.Material]]]]
-
-    def get_visible_leaves(self, pos, bounces):
-        visible_leaves = {self.bsp.models[0].get_leaf_from_point(pos)}
-        for _ in range(bounces):
-            visible_leaves = {l2 for l1 in visible_leaves for l2 in l1.visible_leaves}
-        return visible_leaves
-
-    def set_visible_sample_as_light(self, pos, *, bounces=1):
-        leaf_to_mats = self.leaf_to_mats[self.bsp.models[0]]
-
-        all_sample_as_light_mats = {
-            m
-            for mats in leaf_to_mats.values()
-            for m in mats
-        }
-        visible_sample_as_light_mats = {
-            m
-            for l in self.get_visible_leaves(pos, bounces)
-            for m in leaf_to_mats.get(l, ())
-        }
-        for mat in all_sample_as_light_mats:
-            mat.cycles.sample_as_light = mat in visible_sample_as_light_mats
-
-    def insert_sample_as_light_visibility_keyframe(self, frame):
-        leaf_to_mats = self.leaf_to_mats[self.bsp.models[0]]
-
-        all_sample_as_light_mats = {
-            m
-            for mats in leaf_to_mats.values()
-            for m in mats
-        }
-        for mat in all_sample_as_light_mats:
-            mat.cycles.keyframe_insert('sample_as_light', frame=frame)
-
-    def hide_invisible_fullbright_objects(self, pos, *, bounces=1):
-        visible_faces = {f for l in self.get_visible_leaves(pos, bounces) for f in l.faces}
-
-        for face in self.bsp.models[0].faces:
-            if face in self.fullbright_objects:
-                hide = face not in visible_faces
-                self.fullbright_objects[face].hide_render = hide
-
-        # TODO: Finish the function definition above and do these calls
-        #for model in self.bsp.models[1:]:
-        #    _get_model_leaves
-
-    def insert_fullbright_object_visibility_keyframe(self, frame):
-        for face in self.bsp.models[0].faces:
-            if face in self.fullbright_objects:
-                self.fullbright_objects[face].keyframe_insert('hide_render', frame=frame)
+    sample_as_light_info: Optional[Dict[Model, Dict[Leaf, Dict[bpy.types.Material, Dict]]]]
 
     def add_leaf_mesh(self, pos, obj_name='leaf_simplex'):
         leaf = self.bsp.models[0].get_leaf_from_point(pos)
@@ -471,10 +418,10 @@ def add_bsp(bsp, pal, map_name, config):
         fullbright_objects.update(model_fullbright_objects)
 
     if mat_applier is not None:
-        leaf_to_mats = mat_applier.leaf_to_mats
+        sample_as_light_info = mat_applier.sample_as_light_info
     else:
-        leaf_to_mats = None
+        sample_as_light_info = None
 
     _add_lights(map_cfg.get('lights', {}), map_obj)
 
-    return BlendBsp(bsp, map_obj, model_objs, fullbright_objects, leaf_to_mats)
+    return BlendBsp(bsp, map_obj, model_objs, fullbright_objects, sample_as_light_info)
