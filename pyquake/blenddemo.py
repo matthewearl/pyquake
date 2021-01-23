@@ -410,6 +410,8 @@ class ObjectManager:
 
         view_sx = self._view_simplex(view_origin, view_angles)
 
+        num_tests = 0
+        num_visible = 0
         for sal_obj in self._sample_as_light_objects:
             pvs = view_pvs & set(sal_obj.leaf.visible_leaves)
 
@@ -422,16 +424,20 @@ class ObjectManager:
                                  np.minimum(leaf.bbox.maxs, sal_bbox[1])])
 
                 if np.all(bbox[1] > bbox[0]):
+                    num_tests += 1
                     bbox_simplex = simplex.Simplex.from_bbox(*bbox)
                     try:
                         bbox_simplex.intersect(view_sx)
                     except simplex.Infeasible:
                         pass
                     else:
+                        num_visible += 1
                         vis = True
                         break
 
             sal_obj.add_keyframe(vis, blender_frame)
+        logger.debug('frame: %s, frustum tests: %s, lights visible: %s',
+                     blender_frame, num_tests, num_visible)
 
     def update(self, time, prev_entities, entities, prev_updated, updated, view_angles):
         blender_frame = int(round(self._fps * time))
@@ -555,8 +561,6 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 updated.add(parsed.entity_num)
 
         if time is not None and entities and not demo_done:
-            if time > 7:
-                break
             logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
             last_time = time
