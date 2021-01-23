@@ -11,7 +11,8 @@
         },
         "flame2": {
             "sample_as_light": true,
-            "strength": 10000
+            "strength": 10000,
+            "bbox": [[-256, -256, -256], [256, 256, 256]]
         },
         "lavaball": {
             "sample_as_light": false,

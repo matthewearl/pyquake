@@ -85,6 +85,13 @@ def _quake_angles_to_mat(angles):
     return np.stack([right, forward, up], axis=1)
 
 
+def _get_model_config(mdl_name, config):
+    mdls_cfg = config['models']
+    cfg = dict(mdls_cfg['__default__'])
+    cfg.update(mdls_cfg.get(mdl_name, {}))
+    return cfg
+
+
 @dataclass
 class _EntityInfo:
     """Information for a single entity slot"""
@@ -111,6 +118,58 @@ class _EntityInfo:
 
 
 _DEFAULT_BASELINE = _EntityInfo(0, 0, 0, (0, 0, 0), (0, 0, 0))
+
+
+class SampleAsLightObject:
+    @property
+    def bbox(self):
+        raise NotImplementedError
+
+    @property
+    def leaf(self):
+        raise NotImplementedError
+
+    @property
+    def origin(self):
+        raise NotImplementedError
+
+    @property
+    def mats(self):
+        raise NotImplementedError
+
+    def add_keyframe(self, vis: bool, blender_frame: int):
+        raise NotImplementedError
+
+
+class AliasModelSampleAsLightObject:
+    _bm: blendmdl.BlendMdl
+    _bb: blendbsp.BlendBsp
+
+    def __init__(self, bm, bb, mdl_cfg):
+        self._bm = bm
+        self._bb = bb
+        self._bbox = np.array(mdl_cfg['bbox'])
+
+    @property
+    def bbox(self):
+        return self._bbox
+
+    @property
+    def leaf(self):
+        return self._bb.bsp.models[0].get_leaf_from_point(self.origin)
+
+    @property
+    def origin(self):
+        return np.array(self._bm.obj.location)
+
+    @property
+    def mats(self):
+        return self._bm.sample_as_light_mats
+
+    def add_keyframe(self, vis: bool, blender_frame: int):
+        for mat in self._bm.sample_as_light_mats:
+            mat.cycles.sample_as_light = vis
+            mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
 
 
 @dataclass
@@ -219,9 +278,8 @@ class ObjectManager:
         self._objs: Dict[Tuple[int, int], ManagedObject] = {}
         self._model_paths: Optional[List[str]] = None
         self._view_entity_num: Optional[int] = None
-
         self._static_objects: List[ManagedObject] = []
-        self._static_object_leaves: List[bsp.Leaf] = []
+        self._sample_as_light_objects: List[SampleAsLightObject] = []
 
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
@@ -270,19 +328,27 @@ class ObjectManager:
     def create_static_object(self, model_num, frame, origin, angles, skin):
         model_path = self._model_paths[model_num - 1]
         am = mdl.AliasModel(self._fs.open(model_path))
+
+        mdl_name = self._path_to_model_name(model_path)
+        mdl_cfg = _get_model_config(mdl_name, self._config)
         bm = blendmdl.add_model(am,
                                 self._pal,
-                                self._path_to_model_name(model_path),
+                                mdl_name,
                                 f"static{len(self._static_objects)}",
                                 skin,
-                                self._config['models'],
+                                mdl_cfg,
                                 static_pose_num=frame)
         bm.obj.parent = self.world_obj
         bm.obj.location = origin
         bm.obj.rotation_euler = (0., 0., angles[1])
 
         self._static_objects.append(bm)
-        self._static_object_leaves.append(self._leaf_from_pos(origin))
+
+        if bm.sample_as_light_mats:
+            self._sample_as_light_objects.append(
+                AliasModelSampleAsLightObject(bm, self._bb, mdl_cfg)
+            )
+
 
     def _create_managed_object(self, entity_num, model_num, skin_num):
         model_path = self._model_paths[model_num - 1] if model_num != 0 else None
@@ -295,14 +361,15 @@ class ObjectManager:
             managed_obj = BspModelManagedObject(self._fps, self._bb.model_objs[map_model_idx])
         elif model_path.endswith('.mdl'):
             am = self._load_alias_model(model_path)
-            model_name = self._path_to_model_name(model_path)
-            logger.info('Loading alias model %s', model_name)
+            mdl_name = self._path_to_model_name(model_path)
+            logger.info('Loading alias model %s', mdl_name)
+            mdl_cfg = _get_model_config(mdl_name, self._config)
             bm = blendmdl.add_model(am,
                                     self._pal,
-                                    model_name,
-                                    f'ent{entity_num}_{model_name}',
+                                    mdl_name,
+                                    f'ent{entity_num}_{mdl_name}',
                                     skin_num,
-                                    self._config['models'])
+                                    mdl_cfg)
             bm.obj.parent = self.world_obj
             managed_obj = AliasModelManagedObject(self._fps, bm)
         else:
@@ -312,7 +379,6 @@ class ObjectManager:
 
     def _view_simplex(self, view_origin, view_angles):
         view_origin = np.array(view_origin)
-        view_origin[2] += _EYE_HEIGHT
 
         aspect_ratio = self._width / self._height
         tan_fov = np.tan(0.5 * self._fov * np.pi / 180)
@@ -339,13 +405,13 @@ class ObjectManager:
 
         return simplex.Simplex(3, constraints, np.array([False, True, False, True, False, True]))
 
-    def _update_sample_as_light(self, view_origin, view_angles):
-        view_pvs = self._bb.bsp.get_leaf_from_point(view_origin)
+    def _update_sample_as_light(self, view_origin, view_angles, blender_frame):
+        view_pvs = set(self._bb.bsp.models[0].get_leaf_from_point(view_origin).visible_leaves)
 
         view_sx = self._view_simplex(view_origin, view_angles)
 
         for sal_obj in self._sample_as_light_objects:
-            pvs = view_pvs & set(sal.leaf.visible_leafs)
+            pvs = view_pvs & set(sal_obj.leaf.visible_leaves)
 
             mins, maxs = sal_obj.bbox
             sal_obj_bbox_sx = simplex.Simplex.from_bbox(
@@ -362,6 +428,8 @@ class ObjectManager:
                 else:
                     vis = True
                     break
+
+            sal_obj.add_keyframe(vis, blender_frame)
 
     def update(self, time, prev_entities, entities, prev_updated, updated, view_angles):
         blender_frame = int(round(self._fps * time))
@@ -400,23 +468,17 @@ class ObjectManager:
                     True, time
                 )
 
-        # Set sample_as_light materials.
-        view_origin = entities[self._view_entity_num].origin
-        self._bb.set_visible_sample_as_light(view_origin, bounces=2)
-        self._bb.insert_sample_as_light_visibility_keyframe(blender_frame)
-        vis_leaves = self._bb.get_visible_leaves(view_origin, bounces=2)
-        for bm, leaf in zip(self._static_objects, self._static_object_leaves):
-            is_vis = leaf in vis_leaves
-            for mat in bm.sample_as_light_mats:
-                mat.cycles.sample_as_light = is_vis
-                mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
-
         # Pose camera
+        view_origin = entities[self._view_entity_num].origin
+        view_origin = (view_origin[0], view_origin[1], view_origin[2] + _EYE_HEIGHT)
         self._demo_cam_obj.location = view_origin
-        self._demo_cam_obj.location.z += _EYE_HEIGHT
         self._demo_cam_obj.keyframe_insert('location', frame=blender_frame)
         self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
         self._demo_cam_obj.keyframe_insert('rotation_euler', frame=blender_frame)
+
+        # Set sample_as_light materials.
+        self._update_sample_as_light(view_origin, view_angles, blender_frame)
+
 
     def done(self, final_time: float):
         # Animate static objects
@@ -491,6 +553,8 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 updated.add(parsed.entity_num)
 
         if time is not None and entities and not demo_done:
+            if time > 2.7:
+                break
             logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
             last_time = time

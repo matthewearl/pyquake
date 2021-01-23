@@ -119,12 +119,6 @@ def _get_tri_set_fullbright_frac(am, tri_set, skin_idx):
     return fullbright_area / skin_area
 
 
-def _get_model_config(mdl_name, mdls_cfg):
-    cfg = dict(mdls_cfg['__default__'])
-    cfg.update(mdls_cfg.get(mdl_name, {}))
-    return cfg
-
-
 def _create_shape_key(obj, simple_frame, vert_map):
     shape_key = obj.shape_key_add(name=simple_frame.name)
     for old_vert_idx, shape_key_vert in zip(vert_map, shape_key.data):
@@ -132,9 +126,7 @@ def _create_shape_key(obj, simple_frame, vert_map):
     return shape_key
 
 
-def add_model(am, pal, mdl_name, obj_name, skin_num, mdls_cfg, static_pose_num=None):
-    mdl_cfg = _get_model_config(mdl_name, mdls_cfg)
-
+def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=None):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
     # Validate frames and extract the group pose num (for static models)
