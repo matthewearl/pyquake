@@ -332,6 +332,12 @@ class ObjectManager:
     def _leaf_from_pos(self, pos):
         return self._bb.bsp.models[0].get_leaf_from_point(pos)
 
+    def _path_to_bsp_name(self, bsp_path):
+        m = re.match(r"maps/([a-zA-Z0-9_]+).bsp", bsp_path)
+        if m is None:
+            raise Exception("Unexpected BSP path {mdl_path}")
+        return m.group(1)
+
     def set_model_paths(self, model_paths: List[str]):
         if self._model_paths is not None:
             raise Exception("Model paths already set")
@@ -340,7 +346,7 @@ class ObjectManager:
         map_path = self._model_paths[0]
         logger.info('Parsing bsp %s', map_path)
         b = bsp.Bsp(self._fs.open(map_path))
-        map_name = re.match(r"maps/([a-zA-Z0-9_]+).bsp", map_path).group(1)
+        map_name = self._path_to_bsp_name(map_path)
         logger.info('Adding bsp %s', map_path)
         self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
         self._bb.map_obj.parent = self.world_obj
@@ -409,7 +415,18 @@ class ObjectManager:
                                     mdl_cfg)
             bm.obj.parent = self.world_obj
             managed_obj = AliasModelManagedObject(self._fps, bm)
+        elif model_path.endswith('.bsp'):
+            bsp_name = self._path_to_bsp_name(model_path)
+            logger.info('Loading bsp model %s', bsp_name)
+            b = bsp.Bsp(self._fs.open(model_path))
+            if len(b.models) != 1:
+                raise Exception(f"Expected one model in bsp model {bsp_name}, not {len(b.models)}")
+            bb = blendbsp.add_bsp(b, self._pal, bsp_name, self._config,
+                                  f'ent{entity_num}_')
+            bb.map_obj.parent = self.world_obj
+            managed_obj = BspModelManagedObject(self._fps, bb.model_objs[0])
         else:
+            logging.warning('Cannot handle model %r', model_path)
             managed_obj = NullManagedObject(self._fps)
 
         return managed_obj

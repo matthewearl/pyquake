@@ -33,10 +33,6 @@ from .bsp import Bsp, Face, Leaf, Model
 from . import pak, blendmat
 
 
-_ALL_FULLBRIGHT_IN_OVERLAY = True
-_FULLBRIGHT_OBJECT_OVERLAY = True
-
-
 def _texture_to_arrays(pal, texture, light_tint=(1, 1, 1, 1)):
     im_indices = np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))
     return blendmat.array_ims_from_indices(pal, im_indices, light_tint=light_tint, gamma=0.8)
@@ -260,7 +256,7 @@ def _pydata_from_faces(tuple_faces):
     return verts, [], int_faces
 
 
-def _load_fullbright_objects(model, map_name, pal, mat_applier, map_cfg):
+def _load_fullbright_objects(model, map_name, pal, mat_applier, map_cfg, obj_name_prefix):
     # Calculate bounding boxes for regions of full brightness.
     bboxes = {}
     for texture in {f.tex_info.texture for f in model.faces}:
@@ -308,10 +304,11 @@ def _load_fullbright_objects(model, map_name, pal, mat_applier, map_cfg):
 
         if new_faces:
             # Actually make the mesh and add it to the scene
-            mesh = bpy.data.meshes.new(map_name)
+            obj_name = f'{obj_name_prefix}{map_name}_fullbright_{face_id}'
+            mesh = bpy.data.meshes.new(obj_name)
             mesh.from_pydata(*_pydata_from_faces(new_faces))
 
-            obj = bpy.data.objects.new(f'{map_name}_fullbright_{face_id}', mesh)
+            obj = bpy.data.objects.new(obj_name, mesh)
             bpy.context.scene.collection.objects.link(obj)
 
             fullbright_objects[face] = obj
@@ -324,11 +321,11 @@ def _load_fullbright_objects(model, map_name, pal, mat_applier, map_cfg):
     return fullbright_objects
 
 
-def _load_object(model_id, model, map_name, mat_applier):
+def _load_object(model_id, model, map_name, mat_applier, obj_name_prefix):
     bsp_faces = [face for _, face in _get_visible_faces(model)]
     faces = [list(bsp_face.vertices) for bsp_face in bsp_faces]
 
-    name = f"{map_name}_{model_id}"
+    name = f"{obj_name_prefix}{map_name}_{model_id}"
 
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(*_pydata_from_faces(faces))
@@ -364,8 +361,9 @@ class BlendBsp(NamedTuple):
         obj.parent = self.map_obj
 
 
-def _add_lights(lights_cfg, map_obj):
+def _add_lights(lights_cfg, map_obj, obj_name_prefix):
     for obj_name, light_cfg in lights_cfg.items():
+        obj_name = f'{obj_name_prefix}{obj_name}'
         data = bpy.data.lights.new(name=obj_name, type=light_cfg['type'])
         obj = bpy.data.objects.new(name=obj_name, object_data=data)
         data.energy = light_cfg['energy']
@@ -387,28 +385,33 @@ def load_bsp(pak_root, map_name, config):
     return add_bsp(bsp, pal, map_name, config)
 
 
-def add_bsp(bsp, pal, map_name, config):
+def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
-    map_cfg = config['maps'][map_name]
+    if map_name.startswith('b_'):
+        map_cfg = config['maps']['__bsp_model__']
+    else:
+        map_cfg = config['maps'][map_name]
 
     if map_cfg['do_materials']:
         mat_applier = _MaterialApplier(pal, map_cfg)
     else:
         mat_applier = None
 
-    map_obj = bpy.data.objects.new(map_name, None)
+    map_obj = bpy.data.objects.new(f'{obj_name_prefix}{map_name}', None)
     bpy.context.scene.collection.objects.link(map_obj)
 
     fullbright_objects = {}
     model_objs = {}
     for model_id, model in enumerate(bsp.models):
-        model_obj = _load_object(model_id, model, map_name, mat_applier)
+        model_obj = _load_object(model_id, model, map_name, mat_applier, obj_name_prefix)
         model_obj.parent = map_obj
         model_objs[model_id] = model_obj
 
         if map_cfg['fullbright_object_overlay']:
-            model_fullbright_objects = _load_fullbright_objects(model, map_name, pal, mat_applier, map_cfg)
+            model_fullbright_objects = _load_fullbright_objects(
+                model, map_name, pal, mat_applier, map_cfg, obj_name_prefix
+            )
         else:
             model_fullbright_objects = {}
 
@@ -422,6 +425,6 @@ def add_bsp(bsp, pal, map_name, config):
     else:
         sample_as_light_info = None
 
-    _add_lights(map_cfg.get('lights', {}), map_obj)
+    _add_lights(map_cfg.get('lights', {}), map_obj, obj_name_prefix)
 
     return BlendBsp(bsp, map_obj, model_objs, fullbright_objects, sample_as_light_info)

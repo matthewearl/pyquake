@@ -20,6 +20,18 @@
         }
     },
     "maps": {
+        "__bsp_model__": {
+            "do_materials": true,
+            "fullbright_object_overlay": false,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": false
+                }
+            }
+        },
         "100m": {
             "do_materials": true,
             "fullbright_object_overlay": true,
