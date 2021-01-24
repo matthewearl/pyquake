@@ -180,7 +180,7 @@ class LeafSampleAsLightObject:
         if "bbox" not in self._tex_cfg:
             raise Exception("Sample as light textures must have bounding boxes")
         tex_bbox = np.array(self._tex_cfg['bbox'])
-        return np.stack([self._leaf.bbox.mins - tex_bbox[0],
+        return np.stack([self._leaf.bbox.mins + tex_bbox[0],
                          self._leaf.bbox.maxs + tex_bbox[1]])
 
     @property
@@ -479,46 +479,50 @@ class ObjectManager:
 
         num_tests = 0
         num_visible = 0
-        num_crude_hits = 0
+        num_early_exits = 0
         for sal_obj in self._sample_as_light_objects:
+            # Checking if the light PVS intersects with the view PVS.
             pvs = view_pvs & set(sal_obj.leaf.visible_leaves)
-            if not pvs:
-                continue
+            vis = bool(pvs)
 
-            # Clip leaf bboxes to the light bbox
-            leaf_bboxes = np.stack([[leaf.bbox.mins, leaf.bbox.maxs] for leaf in pvs])
-            bboxes = np.stack([
-                np.maximum(leaf_bboxes[:, 0, :], sal_obj.bbox[0][None, :]),
-                np.minimum(leaf_bboxes[:, 1, :], sal_obj.bbox[1][None, :])
-            ], axis=1)
-            bboxes = bboxes[np.all(bboxes[:, 0] < bboxes[:, 1], axis=1)]
-            if bboxes.shape[0] == 0:
-                continue
+            # Clip leaf PVS bboxes to the light bbox.
+            if vis:
+                leaf_bboxes = np.stack([[leaf.bbox.mins, leaf.bbox.maxs] for leaf in pvs])
+                bboxes = np.stack([
+                    np.maximum(leaf_bboxes[:, 0, :], sal_obj.bbox[0][None, :]),
+                    np.minimum(leaf_bboxes[:, 1, :], sal_obj.bbox[1][None, :])
+                ], axis=1)
+                bboxes = bboxes[np.all(bboxes[:, 0] < bboxes[:, 1], axis=1)]
+                vis = bboxes.shape[0] != 0
 
-            crude_bbox = np.stack([
-                np.min(bboxes[:, 0, :], axis=0),
-                np.max(bboxes[:, 1, :], axis=0),
-            ])
-            num_tests += 1
-            crude_test = self._simplex_bbox_test(crude_bbox, view_sx)
+            # Test if a single bbox that bounds all of the above bboxes intersects the view
+            # frustum.
+            if vis:
+                crude_bbox = np.stack([
+                    np.min(bboxes[:, 0, :], axis=0),
+                    np.max(bboxes[:, 1, :], axis=0),
+                ])
+                num_tests += 1
+                vis = self._simplex_bbox_test(crude_bbox, view_sx)
 
-            vis = False
-            if crude_test:
+            # Finally, check if any of the individual bboxes intersects the view frustum.
+            if vis:
                 for bbox in bboxes:
                     num_tests += 1
                     if self._simplex_bbox_test(bbox, view_sx):
-                        vis = True
                         break
+                else:
+                    vis = False
             else:
-                num_crude_hits += 1
+                num_early_exits += 1
 
             num_visible += vis
             sal_obj.add_keyframe(vis, blender_frame)
 
         self._sal_time += time.perf_counter() - start
-        logger.debug('frame: %s, frustum tests: %s, lights visible: %s, crude hits: %s / %s, total sal time: %s',
+        logger.debug('frame: %s, frustum tests: %s, lights visible: %s, early exits: %s / %s, total sal time: %s',
                      blender_frame, num_tests, num_visible,
-                     num_crude_hits, len(self._sample_as_light_objects),
+                     num_early_exits, len(self._sample_as_light_objects),
                      self._sal_time)
 
     def update(self, time, prev_entities, entities, prev_updated, updated, view_angles):
