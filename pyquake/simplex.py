@@ -26,6 +26,8 @@ __all__ = (
 )
 
 
+import dataclasses
+import functools
 from typing import NamedTuple
 
 import numpy as np
@@ -52,7 +54,8 @@ class Infeasible(Exception):
     pass
 
 
-class Simplex(NamedTuple):
+@dataclasses.dataclass(eq=False)
+class Simplex:
     dim: int
     constraints: np.ndarray
     basic_mask: np.ndarray
@@ -72,6 +75,7 @@ class Simplex(NamedTuple):
         return cls(dim, constraints, basic_mask)
 
     @property
+    @functools.lru_cache(None)
     def vert_to_world(self):
         M = np.concatenate([self.constraints[~self.basic_mask], _one_hot_encode(self.dim, self.dim + 1)[None, :]])
         return np.linalg.inv(M)

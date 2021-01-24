@@ -25,6 +25,7 @@ import functools
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
 
@@ -168,7 +169,7 @@ class AliasModelSampleAsLightObject:
             mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
 
 
-@dataclass
+@dataclass(eq=False)
 class LeafSampleAsLightObject:
     _leaf: bsp.Leaf
     _mat: bpy.types.Material
@@ -313,6 +314,7 @@ class ObjectManager:
         self._view_entity_num: Optional[int] = None
         self._static_objects: List[ManagedObject] = []
         self._sample_as_light_objects: List[SampleAsLightObject] = []
+        self._sal_time: float = 0.
 
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
@@ -459,39 +461,65 @@ class ObjectManager:
 
         return simplex.Simplex(3, constraints, np.array([False, True, False, True, False, True]))
 
+    def _simplex_bbox_test(self, bbox: np.ndarray, sx: simplex.Simplex):
+        bbox_simplex = simplex.Simplex.from_bbox(*bbox)
+        try:
+            bbox_simplex.intersect(sx)
+        except simplex.Infeasible:
+            intersect = False
+        else:
+            intersect = True
+        return intersect
+
     def _update_sample_as_light(self, view_origin, view_angles, blender_frame):
+        start = time.perf_counter()
         view_pvs = set(self._bb.bsp.models[0].get_leaf_from_point(view_origin).visible_leaves)
 
         view_sx = self._view_simplex(view_origin, view_angles)
 
         num_tests = 0
         num_visible = 0
+        num_crude_hits = 0
         for sal_obj in self._sample_as_light_objects:
             pvs = view_pvs & set(sal_obj.leaf.visible_leaves)
+            if not pvs:
+                continue
 
-            sal_bbox = sal_obj.bbox
+            # Clip leaf bboxes to the light bbox
+            leaf_bboxes = np.stack([[leaf.bbox.mins, leaf.bbox.maxs] for leaf in pvs])
+            bboxes = np.stack([
+                np.maximum(leaf_bboxes[:, 0, :], sal_obj.bbox[0][None, :]),
+                np.minimum(leaf_bboxes[:, 1, :], sal_obj.bbox[1][None, :])
+            ], axis=1)
+            bboxes = bboxes[np.all(bboxes[:, 0] < bboxes[:, 1], axis=1)]
+            if bboxes.shape[0] == 0:
+                continue
+
+            crude_bbox = np.stack([
+                np.min(bboxes[:, 0, :], axis=0),
+                np.max(bboxes[:, 1, :], axis=0),
+            ])
+            num_tests += 1
+            crude_test = self._simplex_bbox_test(crude_bbox, view_sx)
 
             vis = False
-            for leaf in pvs:
-                leaf_bbox = np.array([leaf.bbox.mins, leaf.bbox.maxs])
-                bbox = np.stack([np.maximum(leaf.bbox.mins, sal_bbox[0]),
-                                 np.minimum(leaf.bbox.maxs, sal_bbox[1])])
-
-                if np.all(bbox[1] > bbox[0]):
+            if crude_test:
+                for bbox in bboxes:
                     num_tests += 1
-                    bbox_simplex = simplex.Simplex.from_bbox(*bbox)
-                    try:
-                        bbox_simplex.intersect(view_sx)
-                    except simplex.Infeasible:
-                        pass
-                    else:
-                        num_visible += 1
+                    if self._simplex_bbox_test(bbox, view_sx):
                         vis = True
                         break
+            else:
+                num_crude_hits += 1
 
+            num_visible += vis
             sal_obj.add_keyframe(vis, blender_frame)
-        logger.debug('frame: %s, frustum tests: %s, lights visible: %s',
-                     blender_frame, num_tests, num_visible)
+
+        self._sal_time += time.perf_counter() - start
+        logger.debug('frame: %s, frustum tests: %s, lights visible: %s, crude hits: %s / %s, total sal time: %s',
+                     blender_frame, num_tests, num_visible,
+                     num_crude_hits, len(self._sample_as_light_objects),
+                     self._sal_time)
 
     def update(self, time, prev_entities, entities, prev_updated, updated, view_angles):
         blender_frame = int(round(self._fps * time))
