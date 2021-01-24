@@ -32,11 +32,11 @@ from os.path import expanduser
 import sys
 
 for x in [
-     '~/.virtualenvs/blendquake/lib/python3.7/site-packages',
-     '~/pyquake',
+     expanduser('~/.virtualenvs/blendquake/lib/python3.7/site-packages'),
+     expanduser('~/pyquake'),
       ]:
     if x not in sys.path:
-        sys.path.append(expanduser(x))
+        sys.path.append(x)
 
 
 # Import everything, and reload modules that we're likely to change>
@@ -116,6 +116,9 @@ changed:
 - `models.<name>.strength`: Brightness of the emitter.
 - `models.<name>.sample_as_light`: Whether to set the `sample_as_light` (aka
   multiple importance sampling) flag on the material.
+- `models.<name>.bbox`: A pair of (mins, maxs) 3-tuples describing the range of
+  influence of the light emitted by this object.  Required if `sample_as_light`
+  is true.
 - `maps.<name>.fullbright_object_overlay`: Separate out fullbright regions of
   textures with the `overlay` flag set into their own objects.  This is to make
   multiple importance sampling more efficient, since a large object with a small
@@ -129,9 +132,51 @@ changed:
   details.
 - `maps.<name>.textures.<name>.sample_as_light`: Whether to set the
   `sample_as_light` (aka multiple importance sampling) flag on the material.
+- `maps.<name>.texture.<name>.bbox`: A pair of (mins, maxs) 3-tuples describing
+  the range of influence of the light emitted by this surface.  Required if
+  `sample_as_light` is true.
+- `maps.<name>.lights.*`: See below.
 
 The `sample_as_light` flag for model and (static) object materials is set to
 False whenever the demo_cam is out of range of the light, according to the map's
 PVS data.  This is to avoid wasting samples on occluded lights.
 
+
+## Adding lights from .map files
+
+These scripts primarily illuminate the map by treating fullbright textures as
+emissive materials.  However, this approach can still leave dark areas.  Quake
+maps are normally illuminated by light entities, unfortunately these are lost
+when the map is compiled.  To recover them run the script `pyq_extract_lights`
+on the relevant map source file.  Original id map sources are available from
+[here](https://rome.ro/news/2016/2/14/quake-map-sources-released):
+
+```
+pyq_extract_lights pyq_extract_lights ~/quake-map-sources/E1M6.MAP > \
+    ~/quake-map-sources/e1m6-lights.json
+```
+
+The above script produces some JSON which can be parsed and patched into the
+`lights` section of the map config:
+
+```
+with open(expanduser('~/pyquake/config.json')) as f:
+    config = json.load(f)
+
+with open(expanduser('~/quake-map-sources/e1m6-lights.json')) as f:
+    config['maps']['e1m6']['lights'].update(json.load(f))
+```
+
+This will likely put way too many lights in the scene for two reasons:
+
+- Some lights will double up emissive materials that we already produce.
+- Quake's lightmap generation only uses direct illumination, therefore level
+  designers inserted secondary lights to simulate bounced reflections.
+
+The recommonended workflow is to select just a few of these lights such that the
+lighting resembles that of the original game (albeit more realistically).  To do
+this, select the lights you wish to keep and take a note of their object names.
+Finally, copy the lights from the lights JSON file into the relevant section of
+the global `config.json` file.  You may need to tweak the brightness to achieve
+the original effect.  Beware that adding too many lights can introduce noise.
 
