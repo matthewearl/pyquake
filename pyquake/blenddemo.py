@@ -174,6 +174,8 @@ class LeafSampleAsLightObject:
     _leaf: bsp.Leaf
     _mat: bpy.types.Material
     _tex_cfg: Dict
+    _model_idx: int
+    _bb: blendbsp.BlendBsp
 
     @property
     def bbox(self):
@@ -181,11 +183,22 @@ class LeafSampleAsLightObject:
             raise Exception("Sample as light textures must have bounding boxes")
         tex_bbox = np.array(self._tex_cfg['bbox'])
         return np.stack([self._leaf.bbox.mins + tex_bbox[0],
-                         self._leaf.bbox.maxs + tex_bbox[1]])
+                         self._leaf.bbox.maxs + tex_bbox[1]]) + self._model_origin
+
+    @property
+    def _model_origin(self):
+        return np.array(self._bb.model_objs[self._model_idx].location)
 
     @property
     def leaf(self):
-        return self._leaf
+        if self._model_idx == 0:
+            out = self._leaf
+        else:
+            leaf_origin = 0.5 * (np.array(self._leaf.bbox.mins) +
+                                 np.array(self._leaf.bbox.maxs))
+            origin = leaf_origin + self._model_origin
+            out = self._bb.bsp.models[0].get_leaf_from_point(origin)
+        return out
 
     @property
     def mats(self):
@@ -199,7 +212,7 @@ class LeafSampleAsLightObject:
     def create_from_bsp(cls, bb: blendbsp.BlendBsp):
         if bb.sample_as_light_info:
             return (
-                cls(leaf, mat, tex_cfg)
+                cls(leaf, mat, tex_cfg, model.id_, bb)
                 for model, model_info in bb.sample_as_light_info.items()
                 for leaf, leaf_info in model_info.items()
                 for mat, tex_cfg in leaf_info.items()

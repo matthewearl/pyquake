@@ -344,6 +344,11 @@ class Model(NamedTuple):
         sx = simplex.Simplex.from_bbox(bbox.mins, bbox.maxs)
         return n.get_leaves_from_simplex(sx)
 
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.models.index(self)
+
     def __hash__(self):
         return hash(id(self))
 
