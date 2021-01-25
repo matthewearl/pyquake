@@ -29,7 +29,7 @@ import bpy_types
 import bmesh
 import numpy as np
 
-from .bsp import Bsp, Face, Leaf, Model
+from .bsp import Bsp, Face, Leaf, Model, Texture
 from . import pak, blendmat
 
 
@@ -63,12 +63,12 @@ def _get_texture_config(texture, map_cfg):
 
 
 class _MaterialApplier:
-    def __init__(self, pal, map_cfg):
+    def __init__(self, pal, all_textures, map_cfg):
         self._pal = pal
         self._map_cfg = map_cfg
         self.sample_as_light_info = collections.defaultdict(lambda: collections.defaultdict(dict))
+        self._all_textures: Dict[str, bsp.Texture] = all_textures.values()
 
-    @functools.lru_cache(None)
     def _load_image(self, texture):
         tex_cfg = _get_texture_config(texture, self._map_cfg)
         array_im, fullbright_array_im, _ = _texture_to_arrays(self._pal, texture, tex_cfg['tint'])
@@ -77,16 +77,41 @@ class _MaterialApplier:
             fullbright_im = blendmat.im_from_array(f"{texture.name}_fullbright", fullbright_array_im)
         else:
             fullbright_im = None
-        return im, fullbright_im
+        return blendmat.ImagePair(im, fullbright_im)
 
-    def _get_im(self, texture):
-        return self._load_image(texture)[0]
+    @functools.lru_cache(None)
+    def _load_anim_images(self, texture: Texture) -> blendmat.BlendMatImages:
+        if texture.name.startswith('+0'):
+            main_textures = []
+            for i in range(10):
+                tex_name = f'+{i}{texture.name[2:]}'
+                if tex_name in self._all_textures:
+                    main_textures.append(self._all_textures[tex_name])
+                else:
+                    break
 
-    def _get_fullbright_im(self, texture):
-        return self._load_image(texture)[1]
+            alt_textures = []
+            for i in range(10):
+                tex_name_lower = f'+{chr(ord("a") + i)}texture.name[2:]'
+                tex_name_upper = f'+{chr(ord("A") + i)}texture.name[2:]'
+                if tex_name_lower in self._all_textures:
+                    main_textures.append(self._all_textures[tex_name_lower])
+                elif tex_name_upper in self._all_textures:
+                    main_textures.append(self._all_textures[tex_name_upper])
+                else:
+                    break
+
+            out = blendmat.BlendMatImages(
+                frames=[self._load_image(tex) for tex in main_textures],
+                alt_frames=[self._load_image(tex) for tex in alt_textures]
+            )
+        else:
+            out = blendmat.BlendMatImages(frames=[self._load_image])
+
+        return out
 
     def _get_sample_as_light(self, texture, mat_type):
-        if self._get_fullbright_im(texture) is None:
+        if not self._load_anim_images.any_fullbright:
             return False
         tex_cfg = _get_texture_config(texture, self._map_cfg)
         if not tex_cfg['sample_as_light']:
@@ -97,8 +122,8 @@ class _MaterialApplier:
         return True
 
     def _load_material(self, texture, leaf):
-        im = self._get_im(texture)
-        fullbright_im = self._get_fullbright_im(texture)
+        images = self._load_anim_images(texture)
+
         if leaf is None:
             mat_name = f"{texture.name}_main"
         else:
@@ -107,46 +132,44 @@ class _MaterialApplier:
 
         tex_cfg = _get_texture_config(texture, self._map_cfg)
 
-        if fullbright_im is not None:
-            if self._map_cfg['fullbright_object_overlay'] and tex_cfg['overlay']:
-                blendmat.setup_diffuse_material(nodes, links, im)
-            else:
-                blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, tex_cfg['strength'])
+        if images.any_fullbright and (
+                not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
+            bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'])
         else:
-            blendmat.setup_diffuse_material(nodes, links, im)
+            bmat = blendmat.setup_diffuse_material(images, mat_name)
 
-        mat.cycles.sample_as_light = self._get_sample_as_light(texture, "main")
+        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(texture, "main")
 
-        return mat
+        return bmat
 
     def _load_fullbright_obj_material(self, texture, leaf):
-        im = self._get_im(texture)
-        fullbright_im = self._get_fullbright_im(texture)
+        images = self._load_anim_images(texture)
 
-        assert fullbright_im is not None, "Should only be called"
+        assert images.any_fullbright, "Should only be called with fullbright textures"
 
         if leaf is None:
             mat_name = f"{texture.name}_fullbright"
         else:
             mat_name = f"{texture.name}_leaf_{leaf.id_}_fullbright"
-        mat, nodes, links = blendmat.new_mat(mat_name)
-        tex_cfg = _get_texture_config(texture, self._map_cfg)
-        blendmat.setup_transparent_fullbright_material(nodes, links, im, fullbright_im, tex_cfg['strength'])
-        mat.cycles.sample_as_light = self._get_sample_as_light(texture, "fullbright")
 
-        return mat
+        tex_cfg = _get_texture_config(texture, self._map_cfg)
+
+        bmat = blendmat.setup_transparent_fullbright_material(images, mat_name, tex_cfg['strength'])
+        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(texture, "fullbright")
+
+        return bmat
 
     @functools.lru_cache(None)
     def _get_material(self, mat_type, texture, leaf):
         if not self._map_cfg['fullbright_object_overlay']:
             assert mat_type == "main"
         if mat_type == "main":
-            mat = self._load_material(texture, leaf)
+            bmat = self._load_material(texture, leaf)
         elif mat_type == "fullbright":
-            mat = self._load_fullbright_obj_material(texture, leaf)
+            bmat = self._load_fullbright_obj_material(texture, leaf)
         else:
             raise ValueError(f"Invalid mat_type {mat_type}")
-        return mat
+        return bmat
 
     def apply(self, model, mesh, bsp_faces, mat_type):
         slots = []
@@ -157,17 +180,17 @@ class _MaterialApplier:
             tex_cfg = _get_texture_config(texture, self._map_cfg)
             if self._get_sample_as_light(texture, mat_type):
                 # Use a different material for each leaf
-                mat = self._get_material(mat_type, texture, bsp_face.leaf)
-                self.sample_as_light_info[model][bsp_face.leaf][mat] = tex_cfg
+                bmat = self._get_material(mat_type, texture, bsp_face.leaf)
+                self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
             else:
                 # Single material
-                mat = self._get_material(mat_type, texture, None)
+                bmat = self._get_material(mat_type, texture, None)
 
-            if mat not in mat_to_slot_idx:
-                mesh.materials.append(mat)
-                mat_to_slot_idx[mat] = len(mat_to_slot_idx)
+            if bmat not in mat_to_slot_idx:
+                mesh.materials.append(bmat)
+                mat_to_slot_idx[bmat] = len(mat_to_slot_idx)
 
-            mesh_poly.material_index = mat_to_slot_idx[mat]
+            mesh_poly.material_index = mat_to_slot_idx[bmat]
 
 
 def _get_visible_faces(model):
@@ -348,7 +371,7 @@ class BlendBsp(NamedTuple):
     map_obj: bpy_types.Object
     model_objs: Dict[int, bpy_types.Object]
     fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
-    sample_as_light_info: Optional[Dict[Model, Dict[Leaf, Dict[bpy.types.Material, Dict]]]]
+    sample_as_light_info: Optional[Dict[Model, Dict[Leaf, Dict[blendmat.BlendMat, Dict]]]]
 
     def add_leaf_mesh(self, pos, obj_name='leaf_simplex'):
         leaf = self.bsp.models[0].get_leaf_from_point(pos)

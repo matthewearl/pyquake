@@ -29,12 +29,15 @@ import numpy as np
 from . import mdl, blendmat
 
 
+BLENDMATS: Dict[str, blendmat.BlendMat] = {}
+
+
 @dataclass
 class BlendMdl:
     am: "AliasMdl"
     obj: bpy_types.Object
     sub_objs: List[bpy_types.Object]
-    sample_as_light_mats: Set[bpy.types.Material]
+    sample_as_light_mats: Set[blendmat.BlendMat]
 
     _group_pose_num: Optional[int]
     _times: Optional[List[float]]
@@ -142,7 +145,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=No
             raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
 
     # Set up things specific to each tri-set
-    sample_as_light_mats = set()
+    sample_as_light_mats: Set[blendmat.BlendMat] = set()
     obj = bpy.data.objects.new(obj_name, None)
     sub_objs = []
     shape_keys = []
@@ -181,8 +184,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=No
         if sample_as_light:
             mat_name = f"{mat_name}_{obj_name}_triset{tri_set_idx}_fullbright"
 
-        if mat_name not in bpy.data.materials:
-            mat, nodes, links = blendmat.new_mat(mat_name)
+        if mat_name not in BLENDMATS:
             array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(
                 pal,
                 am.skins[skin_num],
@@ -192,16 +194,27 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=No
             if fullbright_array_im is not None:
                 fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
                 strength = mdl_cfg['strength']
-                blendmat.setup_fullbright_material(nodes, links, im, fullbright_im, strength)
+
+                bm = blendmat.setup_fullbright_material(
+                    blendmat.BlendMatImages.from_single_pair(im, fullbright_im),
+                    mat_name,
+                    strength
+                )
             else:
-                blendmat.setup_diffuse_material(nodes, links, im)
-            mat.cycles.sample_as_light = sample_as_light
+                bm = blendmat.setup_diffuse_material(
+                    blendmat.BlendMatImages.from_single_diffuse(im),
+                    mat_name
+                )
+            bm.mat.cycles.sample_as_light = sample_as_light
+
             if sample_as_light:
-                sample_as_light_mats.add(mat)
-        mat = bpy.data.materials[mat_name]
+                sample_as_light_mats.add(bm)
+
+            BLENDMATS[mat_name] = bm
+        bm = BLENDMATS[mat_name]
 
         # Apply the material
-        mesh.materials.append(mat)
+        mesh.materials.append(bm.mat)
         _set_uvs(mesh, am, tri_set)
 
     return BlendMdl(am, obj, sub_objs, sample_as_light_mats,

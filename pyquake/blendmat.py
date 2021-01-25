@@ -28,6 +28,8 @@ __all__ = (
     'setup_transparent_fullbright_material',
 )
 
+from dataclasses import dataclass
+from typing import List, Iterable
 
 import bpy
 import numpy as np
@@ -59,7 +61,7 @@ def array_ims_from_indices(pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1), 
     return array_im, fullbright_array_im, fullbright_array
 
 
-def new_mat(name):
+def _new_mat(name):
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
 
@@ -74,57 +76,221 @@ def new_mat(name):
     return mat, nodes, links
 
 
-def setup_diffuse_material(nodes, links, im):
-    texture_node = nodes.new('ShaderNodeTexImage')
+@dataclass(eq=False)
+class BlendMatImagePair:
+    im: bpy.types.Image
+    fullbright_im: Optional[bpy.types.Image]
+
+
+@dataclass(eq=False)
+class BlendMatImages:
+    frames: List[BlendMatImagePair]
+    alt_frames: List[BlendMatImagePair]
+
+    @classmethod
+    def from_single_diffuse(cls, im: bpy.types.Image):
+        return cls(
+            frames=[BlendMatImagePair(im, None)],
+            alt_frames=[]
+        )
+
+    @classmethod
+    def from_single_pair(cls, im: bpy.types.Image, fullbright_im: bpy.types.Image):
+        return cls(
+            frames=[BlendMatImagePair(im, fullbright_im)],
+            alt_frames=[]
+        )
+
+    @property
+    def any_fullbright(self):
+        return any(p.fullbright_im is not None for l in [frames, alt_frames] for p in l)
+
+
+@dataclass(eq=False)
+class BlendMat:
+    mat: bpy.types.Material
+    _frame_input: Optional[bpy.types.NodeSocketFloatFactor]
+    _time_input: Optional[bpy.types.NodeSocketFloatFactor]
+
+    def add_time_keyframe(self, time: float, blender_frame: int):
+        self._time_input.default_value = time
+        self._time_input.keyframe_insert('default_value', frame=blender_frame)
+
+    def add_frame_keyframe(self, frame: int, blender_frame: int):
+        self._frame_input.default_value = frame
+        self._frame_input.keyframe_insert('default_value', frame=blender_frame)
+
+    def add_sample_as_light_keyframe(self, sample_as_light: bool, blender_frame: int):
+        self.mat.cycles.sample_as_light = sample_as_light
+        self.mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
+
+
+def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -> \
+        Tuple[bpy.types.NodeSocketColor, List[bpy.types.NodeSocketFloatFactor]]
+    texture_nodes = []
+    for im in ims:
+        if im is not None:
+            texture_node = nodes.new('ShaderNodeTexImage')
+            texture_node.image = im
+            texture_node.interpolation = 'Closest'
+            texture_nodes.append(texture_node)
+        texture_nodes.append(None)
+
+    if len(texture_nodes) == 1:
+        out = texture_nodes[0].outputs['Color'], []
+    elif len(texture_nodes) > 1:
+        prev_output = texture_nodes[0].outputs['Color']
+
+        mul_node = nodes.new('ShaderNodeMath')
+        mul_node.operation = 'MULTIPLY'
+        mul_node.inputs[1].default_value = 10
+        time_input = mul_node.inputs[0]
+
+        mod_node = nodes.new('ShaderNodeMath')
+        mod_node.operation = 'MODULO'
+        links.new(mod_node.inputs[0], mul_node.outputs['Value'])
+        mod_node.inputs[1].default_value = len(texture_nodes)
+
+        floor_node = nodes.new('ShaderNodeMath')
+        floor_node.operation = 'FLOOR'
+        links.new(floor_node.inputs[0], mod_node.outputs['Value'])
+        frame_output = floor_node.outputs['Value']
+
+        for frame_num, texture_node in enumerate(texture_nodes[1:], 1):
+            sub_node = nodes.new('ShaderNodeMath')
+            sub_node.operation = 'SUBTRACT'
+            sub_node.inputs[1].default_value = frame_num
+            links.new(sub_node.inputs[0], frame_output)
+
+            mix_node = nodes.new('ShaderNodeMixRGB')
+            links.new(mix_node.inputs['Color1'], prev_output)
+            if texture_node is not None:
+                links.new(mix_node.inputs['Color2'], texture_node.outputs['Color'])
+            links.new(mix_node.inputs['Fac'], sub_node.outputs['Value'])
+
+            prev_output = mix_node.outputs['Color']
+
+        out = prev_output, [time_input]
+    else:
+        raise ValueError('No images passed')
+
+    return out
+
+
+def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False) -> \
+        Tuple[bpy.types.NodeSocketColor,
+              List[bpy.types.NodeSocketFloatFactor],
+              List[bpy.types.NodeSocketFloatFactor]]
+    main_output, main_time_input = _setup_image_nodes(
+        ((im_pair.fullbright_im if fullbright else im_pair.im)
+            for im_pair in ims.frames)
+        nodes, links
+    )
+
+    if not ims.alt_frames:
+        out = main_output, [main_time_input], []
+    else:
+        alt_output, alt_time_input = _setup_image_nodes(
+            ((im_pair.fullbright_im if fullbright else im_pair.im)
+                for im_pair in ims.alt_frames)
+            nodes, links
+        )
+
+        mix_node = nodes.new('ShaderNodeMixRGB')
+        links.new(mix_node.inputs['Color1'], main_output)
+        links.new(mix_node.inputs['Color2'], alt_output)
+
+        out = (mix_node.outputs['Color'],
+               [main_time_input, alt_time_input],
+               [mix_node.inputs['Fac']])
+
+    return out
+
+
+def _create_value_node(inputs, nodes, links):
+    value_node = nodes.new('ShaderNodeValue')
+    for inp in inputs:
+        links.add(inp, value_node.outputs['Value'])
+    return value_node.outputs['Value']
+
+
+def setup_diffuse_material(ims: BlendMatImages, mat_name: str):
+    mat, nodes, links = _new_mat(mat_name)
+
+    im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, fullbright=False)
+
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
+    links.new(diffuse_node.inputs['Color'], im_output)
     links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
 
+    return BlendMat(
+        mat,
+        _create_value_node(time_inputs) if time_inputs else None,
+        _create_value_node(frame_inputs) if frame_inputs else None
+    )
 
-def setup_fullbright_material(nodes, links, im, glow_im, strength):
-    texture_node = nodes.new('ShaderNodeTexImage')
+
+def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float):
+    mat, nodes, links = _new_mat(mat_name)
+
+    diffuse_im_output, diffuse_time_inputs, diffuse_frame_inputs = _setup_alt_image_nodes(
+        ims, nodes, links, fullbright=False
+    )
+    fullbright_im_output, fullbright_time_inputs, fullbright_frame_inputs = _setup_alt_image_nodes(
+            ims, nodes, links, fullbright=True
+    )
+    time_inputs = diffuse_time_inputs + fullbright_time_inputs
+    frame_inputs = diffuse_frame_inputs + fullbright_frame_inputs
+
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
     add_node = nodes.new('ShaderNodeAddShader')
-    glow_texture_node = nodes.new('ShaderNodeTexImage')
     emission_node = nodes.new('ShaderNodeEmission')
-
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    glow_texture_node.image = glow_im
-    glow_texture_node.interpolation = 'Closest'
 
     emission_node.inputs['Strength'].default_value = strength
 
-    links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
-    links.new(emission_node.inputs['Color'], glow_texture_node.outputs['Color'])
+    links.new(diffuse_node.inputs['Color'], diffuse_im_output)
+    links.new(emission_node.inputs['Color'], fullbright_im_output)
     links.new(add_node.inputs[0], diffuse_node.outputs['BSDF'])
     links.new(add_node.inputs[1], emission_node.outputs['Emission'])
     links.new(output_node.inputs['Surface'], add_node.outputs['Shader'])
 
+    return BlendMat(
+        mat,
+        _create_value_node(time_inputs) if time_inputs else None,
+        _create_value_node(frame_inputs) if frame_inputs else None
+    )
 
-def setup_transparent_fullbright_material(nodes, links, im, glow_im, strength):
-    texture_node = nodes.new('ShaderNodeTexImage')
+
+def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float):
+    mat, nodes, links = _new_mat(mat_name)
+
+    diffuse_im_output, diffuse_time_inputs, diffuse_frame_inputs = _setup_alt_image_nodes(
+        ims, nodes, links, fullbright=False
+    )
+    fullbright_im_output, fullbright_time_inputs, fullbright_frame_inputs = _setup_alt_image_nodes(
+        ims, nodes, links, fullbright=True
+    )
+    time_inputs = diffuse_time_inputs + fullbright_time_inputs
+    frame_inputs = diffuse_frame_inputs + fullbright_frame_inputs
+
     emission_node = nodes.new('ShaderNodeEmission')
     output_node = nodes.new('ShaderNodeOutputMaterial')
-    glow_texture_node = nodes.new('ShaderNodeTexImage')
     mix_node = nodes.new('ShaderNodeMixShader')
     transparent_node = nodes.new('ShaderNodeBsdfTransparent')
 
-    texture_node.image = im
-    texture_node.interpolation = 'Closest'
-    glow_texture_node.image = glow_im
-    glow_texture_node.interpolation = 'Closest'
-
     emission_node.inputs['Strength'].default_value = strength
 
-    links.new(emission_node.inputs['Color'], texture_node.outputs['Color'])
-    links.new(mix_node.inputs[0], glow_texture_node.outputs['Color'])
+    links.new(emission_node.inputs['Color'], diffuse_im_output)
+    links.new(mix_node.inputs[0], fullbright_im_output)
     links.new(mix_node.inputs[1], transparent_node.outputs['BSDF'])
     links.new(mix_node.inputs[2], emission_node.outputs['Emission'])
     links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
 
+    return BlendMat(
+        mat,
+        _create_value_node(time_inputs) if time_inputs else None,
+        _create_value_node(frame_inputs) if frame_inputs else None
+    )

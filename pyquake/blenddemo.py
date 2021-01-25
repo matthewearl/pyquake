@@ -134,10 +134,6 @@ class SampleAsLightObject:
     def origin(self):
         raise NotImplementedError
 
-    @property
-    def mats(self):
-        raise NotImplementedError
-
     def add_keyframe(self, vis: bool, blender_frame: int):
         raise NotImplementedError
 
@@ -159,14 +155,9 @@ class AliasModelSampleAsLightObject:
     def leaf(self):
         return self._bb.bsp.models[0].get_leaf_from_point(self._bm.obj.location)
 
-    @property
-    def mats(self):
-        return self._bm.sample_as_light_mats
-
     def add_keyframe(self, vis: bool, blender_frame: int):
-        for mat in self._bm.sample_as_light_mats:
-            mat.cycles.sample_as_light = vis
-            mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
+        for bmat in self._bm.sample_as_light_mats:
+            bmat.add_sample_as_light_keyframe(vis, blender_frame)
 
 
 @dataclass(eq=False)
@@ -199,10 +190,6 @@ class LeafSampleAsLightObject:
             origin = leaf_origin + self._model_origin
             out = self._bb.bsp.models[0].get_leaf_from_point(origin)
         return out
-
-    @property
-    def mats(self):
-        return [self._mat]
 
     def add_keyframe(self, vis: bool, blender_frame: int):
         self._mat.cycles.sample_as_light = vis
