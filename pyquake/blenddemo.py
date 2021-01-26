@@ -192,8 +192,7 @@ class LeafSampleAsLightObject:
         return out
 
     def add_keyframe(self, vis: bool, blender_frame: int):
-        self._mat.cycles.sample_as_light = vis
-        self._mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
+        self._mat.add_sample_as_light_keyframe(vis, blender_frame)
 
     @classmethod
     def create_from_bsp(cls, bb: blendbsp.BlendBsp):
@@ -647,6 +646,8 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 updated.add(parsed.entity_num)
 
         if time is not None and entities and not demo_done:
+            if time > 4:
+                break
             logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
             last_time = time

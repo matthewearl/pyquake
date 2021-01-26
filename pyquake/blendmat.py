@@ -29,7 +29,7 @@ __all__ = (
 )
 
 from dataclasses import dataclass
-from typing import List, Iterable
+from typing import List, Iterable, Optional, Tuple
 
 import bpy
 import numpy as np
@@ -103,7 +103,7 @@ class BlendMatImages:
 
     @property
     def any_fullbright(self):
-        return any(p.fullbright_im is not None for l in [frames, alt_frames] for p in l)
+        return any(p.fullbright_im is not None for l in [self.frames, self.alt_frames] for p in l)
 
 
 @dataclass(eq=False)
@@ -126,7 +126,7 @@ class BlendMat:
 
 
 def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -> \
-        Tuple[bpy.types.NodeSocketColor, List[bpy.types.NodeSocketFloatFactor]]
+        Tuple[bpy.types.NodeSocketColor, List[bpy.types.NodeSocketFloatFactor]]:
     texture_nodes = []
     for im in ims:
         if im is not None:
@@ -134,7 +134,8 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
             texture_node.image = im
             texture_node.interpolation = 'Closest'
             texture_nodes.append(texture_node)
-        texture_nodes.append(None)
+        else:
+            texture_nodes.append(None)
 
     if len(texture_nodes) == 1:
         out = texture_nodes[0].outputs['Color'], []
@@ -180,19 +181,19 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
 def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False) -> \
         Tuple[bpy.types.NodeSocketColor,
               List[bpy.types.NodeSocketFloatFactor],
-              List[bpy.types.NodeSocketFloatFactor]]
-    main_output, main_time_input = _setup_image_nodes(
+              List[bpy.types.NodeSocketFloatFactor]]:
+    main_output, main_time_inputs = _setup_image_nodes(
         ((im_pair.fullbright_im if fullbright else im_pair.im)
-            for im_pair in ims.frames)
+            for im_pair in ims.frames),
         nodes, links
     )
 
     if not ims.alt_frames:
-        out = main_output, [main_time_input], []
+        out = main_output, main_time_inputs, []
     else:
-        alt_output, alt_time_input = _setup_image_nodes(
+        alt_output, alt_time_inputs = _setup_image_nodes(
             ((im_pair.fullbright_im if fullbright else im_pair.im)
-                for im_pair in ims.alt_frames)
+                for im_pair in ims.alt_frames),
             nodes, links
         )
 
@@ -201,7 +202,7 @@ def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False)
         links.new(mix_node.inputs['Color2'], alt_output)
 
         out = (mix_node.outputs['Color'],
-               [main_time_input, alt_time_input],
+               main_time_input + alt_time_input,
                [mix_node.inputs['Fac']])
 
     return out
@@ -210,7 +211,7 @@ def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False)
 def _create_value_node(inputs, nodes, links):
     value_node = nodes.new('ShaderNodeValue')
     for inp in inputs:
-        links.add(inp, value_node.outputs['Value'])
+        links.new(inp, value_node.outputs['Value'])
     return value_node.outputs['Value']
 
 
@@ -227,8 +228,8 @@ def setup_diffuse_material(ims: BlendMatImages, mat_name: str):
 
     return BlendMat(
         mat,
-        _create_value_node(time_inputs) if time_inputs else None,
-        _create_value_node(frame_inputs) if frame_inputs else None
+        _create_value_node(time_inputs, nodes, links) if time_inputs else None,
+        _create_value_node(frame_input, nodes, linkss) if frame_inputs else None
     )
 
 
@@ -259,8 +260,8 @@ def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: floa
 
     return BlendMat(
         mat,
-        _create_value_node(time_inputs) if time_inputs else None,
-        _create_value_node(frame_inputs) if frame_inputs else None
+        _create_value_node(time_inputs, nodes, links) if time_inputs else None,
+        _create_value_node(frame_input, nodes, links) if frame_inputs else None
     )
 
 
@@ -291,6 +292,6 @@ def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, st
 
     return BlendMat(
         mat,
-        _create_value_node(time_inputs) if time_inputs else None,
-        _create_value_node(frame_inputs) if frame_inputs else None
+        _create_value_node(time_inputs, nodes, links) if time_inputs else None,
+        _create_value_node(frame_input, nodes, linkss) if frame_inputs else None
     )

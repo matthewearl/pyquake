@@ -394,6 +394,11 @@ class Bsp:
     def _leaf_to_path(self):
         return {leaf: path for m in self.models for leaf, path in m.node._generate_leaf_paths()}
 
+    @property
+    @functools.lru_cache(None)
+    def textures_by_name(self):
+        return {t.name: t for t in self.textures.values()}
+
     def _read(self, f, n):
         b = f.read(n)
         if len(b) < n:

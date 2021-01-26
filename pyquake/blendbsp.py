@@ -22,6 +22,7 @@
 import collections
 import functools
 import logging
+import operator
 from typing import NamedTuple, Optional, Any, Dict, Set
 
 import bpy
@@ -62,12 +63,40 @@ def _get_texture_config(texture, map_cfg):
     return cfg
 
 
+def _get_anim_textures(texture: Texture, texture_dict: Dict[str, Texture]) -> blendmat.BlendMatImages:
+    if texture.name.startswith('+0'):
+        print([k for k in texture_dict.keys() if k.startswith('+')])
+        main_textures = []
+        for i in range(10):
+            tex_name = f'+{i}{texture.name[2:]}'
+            print(tex_name)
+            if tex_name in texture_dict:
+                main_textures.append(texture_dict[tex_name])
+            else:
+                break
+
+        alt_textures = []
+        for i in range(10):
+            tex_name_lower = f'+{chr(ord("a") + i)}texture.name[2:]'
+            tex_name_upper = f'+{chr(ord("A") + i)}texture.name[2:]'
+            if tex_name_lower in texture_dict:
+                main_textures.append(texture_dict[tex_name_lower])
+            elif tex_name_upper in texture_dict:
+                main_textures.append(texture_dict[tex_name_upper])
+            else:
+                break
+    else:
+        main_textures, alt_textures = [texture], []
+
+    return main_textures, alt_textures
+
+
 class _MaterialApplier:
-    def __init__(self, pal, all_textures, map_cfg):
+    def __init__(self, pal, texture_dict, map_cfg):
         self._pal = pal
         self._map_cfg = map_cfg
         self.sample_as_light_info = collections.defaultdict(lambda: collections.defaultdict(dict))
-        self._all_textures: Dict[str, bsp.Texture] = all_textures.values()
+        self._all_textures: Dict[str, Texture] = texture_dict
 
     def _load_image(self, texture):
         tex_cfg = _get_texture_config(texture, self._map_cfg)
@@ -77,41 +106,19 @@ class _MaterialApplier:
             fullbright_im = blendmat.im_from_array(f"{texture.name}_fullbright", fullbright_array_im)
         else:
             fullbright_im = None
-        return blendmat.ImagePair(im, fullbright_im)
+        return blendmat.BlendMatImagePair(im, fullbright_im)
 
     @functools.lru_cache(None)
     def _load_anim_images(self, texture: Texture) -> blendmat.BlendMatImages:
-        if texture.name.startswith('+0'):
-            main_textures = []
-            for i in range(10):
-                tex_name = f'+{i}{texture.name[2:]}'
-                if tex_name in self._all_textures:
-                    main_textures.append(self._all_textures[tex_name])
-                else:
-                    break
-
-            alt_textures = []
-            for i in range(10):
-                tex_name_lower = f'+{chr(ord("a") + i)}texture.name[2:]'
-                tex_name_upper = f'+{chr(ord("A") + i)}texture.name[2:]'
-                if tex_name_lower in self._all_textures:
-                    main_textures.append(self._all_textures[tex_name_lower])
-                elif tex_name_upper in self._all_textures:
-                    main_textures.append(self._all_textures[tex_name_upper])
-                else:
-                    break
-
-            out = blendmat.BlendMatImages(
-                frames=[self._load_image(tex) for tex in main_textures],
-                alt_frames=[self._load_image(tex) for tex in alt_textures]
-            )
-        else:
-            out = blendmat.BlendMatImages(frames=[self._load_image])
-
-        return out
+        main_textures, alt_textures = _get_anim_textures(texture, self._all_textures)
+        print(texture.name, [t.name for t in main_textures], [t.name for t in alt_textures])
+        return blendmat.BlendMatImages(
+            frames=[self._load_image(tex) for tex in main_textures],
+            alt_frames=[self._load_image(tex) for tex in alt_textures]
+        )
 
     def _get_sample_as_light(self, texture, mat_type):
-        if not self._load_anim_images.any_fullbright:
+        if not self._load_anim_images(texture).any_fullbright:
             return False
         tex_cfg = _get_texture_config(texture, self._map_cfg)
         if not tex_cfg['sample_as_light']:
@@ -128,8 +135,6 @@ class _MaterialApplier:
             mat_name = f"{texture.name}_main"
         else:
             mat_name = f"{texture.name}_leaf_{leaf.id_}_main"
-        mat, nodes, links = blendmat.new_mat(mat_name)
-
         tex_cfg = _get_texture_config(texture, self._map_cfg)
 
         if images.any_fullbright and (
@@ -187,7 +192,7 @@ class _MaterialApplier:
                 bmat = self._get_material(mat_type, texture, None)
 
             if bmat not in mat_to_slot_idx:
-                mesh.materials.append(bmat)
+                mesh.materials.append(bmat.mat)
                 mat_to_slot_idx[bmat] = len(mat_to_slot_idx)
 
             mesh_poly.material_index = mat_to_slot_idx[bmat]
@@ -279,11 +284,18 @@ def _pydata_from_faces(tuple_faces):
     return verts, [], int_faces
 
 
-def _load_fullbright_objects(model, map_name, pal, mat_applier, map_cfg, obj_name_prefix):
+def _get_union_fullbright_array(pal, texture, texture_dict):
+    return functools.reduce(operator.or_,
+                            (_texture_to_arrays(pal, tex)[2]
+                             for tex_list in _get_anim_textures(texture, texture_dict)
+                             for tex in tex_list))
+
+
+def _load_fullbright_objects(model, map_name, pal, texture_dict, mat_applier, map_cfg, obj_name_prefix):
     # Calculate bounding boxes for regions of full brightness.
     bboxes = {}
     for texture in {f.tex_info.texture for f in model.faces}:
-        _, _, fullbright_array = _texture_to_arrays(pal, texture)
+        fullbright_array = _get_union_fullbright_array(pal, texture, texture_dict)
         if np.any(fullbright_array):
             bboxes[texture] = _get_bbox(fullbright_array)
 
@@ -417,7 +429,7 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
         map_cfg = config['maps'][map_name]
 
     if map_cfg['do_materials']:
-        mat_applier = _MaterialApplier(pal, map_cfg)
+        mat_applier = _MaterialApplier(pal, bsp.textures_by_name, map_cfg)
     else:
         mat_applier = None
 
@@ -433,7 +445,7 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
 
         if map_cfg['fullbright_object_overlay']:
             model_fullbright_objects = _load_fullbright_objects(
-                model, map_name, pal, mat_applier, map_cfg, obj_name_prefix
+                model, map_name, pal, bsp.textures_by_name, mat_applier, map_cfg, obj_name_prefix
             )
         else:
             model_fullbright_objects = {}
