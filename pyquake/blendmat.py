@@ -138,9 +138,15 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
             texture_nodes.append(None)
 
     if len(texture_nodes) == 1:
-        out = texture_nodes[0].outputs['Color'], []
+        if texture_nodes[0] is None:
+            out = None, []
+        else:
+            out = texture_nodes[0].outputs['Color'], []
     elif len(texture_nodes) > 1:
-        prev_output = texture_nodes[0].outputs['Color']
+        if texture_nodes[0] is None:
+            prev_output = None
+        else:
+            prev_output = texture_nodes[0].outputs['Color']
 
         mul_node = nodes.new('ShaderNodeMath')
         mul_node.operation = 'MULTIPLY'
@@ -160,13 +166,19 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
         for frame_num, texture_node in enumerate(texture_nodes[1:], 1):
             sub_node = nodes.new('ShaderNodeMath')
             sub_node.operation = 'SUBTRACT'
-            sub_node.inputs[1].default_value = frame_num
-            links.new(sub_node.inputs[0], frame_output)
+            sub_node.inputs[0].default_value = frame_num
+            links.new(sub_node.inputs[1], frame_output)
 
             mix_node = nodes.new('ShaderNodeMixRGB')
-            links.new(mix_node.inputs['Color1'], prev_output)
             if texture_node is not None:
-                links.new(mix_node.inputs['Color2'], texture_node.outputs['Color'])
+                links.new(mix_node.inputs['Color1'], texture_node.outputs['Color'])
+            else:
+                mix_node.inputs['Color1'].default_value = (0, 0, 0, 1)
+            if prev_output is None:
+                mix_nodes.inputs['Color2'].default_value = (0, 0, 0, 1)
+            else:
+                links.new(mix_node.inputs['Color2'], prev_output)
+
             links.new(mix_node.inputs['Fac'], sub_node.outputs['Value'])
 
             prev_output = mix_node.outputs['Color']
@@ -198,11 +210,18 @@ def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False)
         )
 
         mix_node = nodes.new('ShaderNodeMixRGB')
-        links.new(mix_node.inputs['Color1'], main_output)
-        links.new(mix_node.inputs['Color2'], alt_output)
+        if main_output is not None:
+            links.new(mix_node.inputs['Color1'], main_output)
+        else:
+            mix_node.inputs['Color1'].default_value = (0, 0, 0, 1)
+
+        if alt_output is not None:
+            links.new(mix_node.inputs['Color2'], alt_output)
+        else:
+            mix_node.inputs['Color2'].default_value = (0, 0, 0, 1)
 
         out = (mix_node.outputs['Color'],
-               main_time_input + alt_time_input,
+               main_time_inputs + alt_time_inputs,
                [mix_node.inputs['Fac']])
 
     return out
@@ -229,7 +248,7 @@ def setup_diffuse_material(ims: BlendMatImages, mat_name: str):
     return BlendMat(
         mat,
         _create_value_node(time_inputs, nodes, links) if time_inputs else None,
-        _create_value_node(frame_input, nodes, linkss) if frame_inputs else None
+        _create_value_node(frame_inputs, nodes, links) if frame_inputs else None
     )
 
 
@@ -293,5 +312,5 @@ def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, st
     return BlendMat(
         mat,
         _create_value_node(time_inputs, nodes, links) if time_inputs else None,
-        _create_value_node(frame_input, nodes, linkss) if frame_inputs else None
+        _create_value_node(frame_inputs, nodes, links) if frame_inputs else None
     )

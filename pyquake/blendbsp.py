@@ -65,11 +65,9 @@ def _get_texture_config(texture, map_cfg):
 
 def _get_anim_textures(texture: Texture, texture_dict: Dict[str, Texture]) -> blendmat.BlendMatImages:
     if texture.name.startswith('+0'):
-        print([k for k in texture_dict.keys() if k.startswith('+')])
         main_textures = []
         for i in range(10):
             tex_name = f'+{i}{texture.name[2:]}'
-            print(tex_name)
             if tex_name in texture_dict:
                 main_textures.append(texture_dict[tex_name])
             else:
@@ -77,12 +75,12 @@ def _get_anim_textures(texture: Texture, texture_dict: Dict[str, Texture]) -> bl
 
         alt_textures = []
         for i in range(10):
-            tex_name_lower = f'+{chr(ord("a") + i)}texture.name[2:]'
-            tex_name_upper = f'+{chr(ord("A") + i)}texture.name[2:]'
+            tex_name_lower = f'+{chr(ord("a") + i)}{texture.name[2:]}'
+            tex_name_upper = f'+{chr(ord("A") + i)}{texture.name[2:]}'
             if tex_name_lower in texture_dict:
-                main_textures.append(texture_dict[tex_name_lower])
+                alt_textures.append(texture_dict[tex_name_lower])
             elif tex_name_upper in texture_dict:
-                main_textures.append(texture_dict[tex_name_upper])
+                alt_textures.append(texture_dict[tex_name_upper])
             else:
                 break
     else:
@@ -111,7 +109,6 @@ class _MaterialApplier:
     @functools.lru_cache(None)
     def _load_anim_images(self, texture: Texture) -> blendmat.BlendMatImages:
         main_textures, alt_textures = _get_anim_textures(texture, self._all_textures)
-        print(texture.name, [t.name for t in main_textures], [t.name for t in alt_textures])
         return blendmat.BlendMatImages(
             frames=[self._load_image(tex) for tex in main_textures],
             alt_frames=[self._load_image(tex) for tex in alt_textures]
