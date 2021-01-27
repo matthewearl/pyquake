@@ -84,19 +84,22 @@ class BlendMatImagePair:
 
 @dataclass(eq=False)
 class BlendMatImages:
+    texture_name: str
     frames: List[BlendMatImagePair]
     alt_frames: List[BlendMatImagePair]
 
     @classmethod
-    def from_single_diffuse(cls, im: bpy.types.Image):
+    def from_single_diffuse(cls, texture_name: str, im: bpy.types.Image):
         return cls(
+            texture_name,
             frames=[BlendMatImagePair(im, None)],
             alt_frames=[]
         )
 
     @classmethod
-    def from_single_pair(cls, im: bpy.types.Image, fullbright_im: bpy.types.Image):
+    def from_single_pair(cls, texture_name: str, im: bpy.types.Image, fullbright_im: bpy.types.Image):
         return cls(
+            texture_name,
             frames=[BlendMatImagePair(im, fullbright_im)],
             alt_frames=[]
         )
@@ -104,6 +107,14 @@ class BlendMatImages:
     @property
     def any_fullbright(self):
         return any(p.fullbright_im is not None for l in [self.frames, self.alt_frames] for p in l)
+
+    @property
+    def is_animated(self):
+        return len(self.frames) > 1 or len(self.alt_frames) > 1
+
+    @property
+    def is_posable(self):
+        return len(self.alt_frames) > 0
 
 
 @dataclass(eq=False)
@@ -123,6 +134,14 @@ class BlendMat:
     def add_sample_as_light_keyframe(self, sample_as_light: bool, blender_frame: int):
         self.mat.cycles.sample_as_light = sample_as_light
         self.mat.cycles.keyframe_insert('sample_as_light', frame=blender_frame)
+
+    @property
+    def is_animated(self):
+        return self._time_input is not None
+
+    @property
+    def is_posable(self):
+        return self._frame_input is not None
 
 
 def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -> \

@@ -260,17 +260,20 @@ class AliasModelManagedObject(ManagedObject):
 
 @dataclass
 class BspModelManagedObject(ManagedObject):
-    obj: bpy_types.Object
+    _bb: blendbsp.BlendBsp
+    _model_num: int
 
     def add_pose_keyframe(self, pose_num: int, time: float):
-        pass
+        model = self._bb.bsp.models[self._model_num]
+        self._bb.add_material_frame_keyframe(model, pose_num, self._get_blender_frame(time))
 
     def add_visible_keyframe(self, visible: bool, time: float):
         pass
 
     def add_origin_keyframe(self, origin: Vec3, time: float):
-        self.obj.location = origin
-        self.obj.keyframe_insert('location', frame=self._get_blender_frame(time))
+        obj = self._bb.model_objs[self._model_num]
+        obj.location = origin
+        obj.keyframe_insert('location', frame=self._get_blender_frame(time))
 
     def add_angles_keyframe(self, angles: Vec3, time: float):
         pass
@@ -402,7 +405,7 @@ class ObjectManager:
             managed_obj = NullManagedObject(self._fps)
         elif model_path.startswith('*'):
             map_model_idx = int(model_path[1:])
-            managed_obj = BspModelManagedObject(self._fps, self._bb.model_objs[map_model_idx])
+            managed_obj = BspModelManagedObject(self._fps, self._bb, map_model_idx)
         elif model_path.endswith('.mdl'):
             am = self._load_alias_model(model_path)
             mdl_name = self._path_to_model_name(model_path)
@@ -425,7 +428,7 @@ class ObjectManager:
             bb = blendbsp.add_bsp(b, self._pal, bsp_name, self._config,
                                   f'ent{entity_num}_')
             bb.map_obj.parent = self.world_obj
-            managed_obj = BspModelManagedObject(self._fps, bb.model_objs[0])
+            managed_obj = BspModelManagedObject(self._fps, bb, 0)
         else:
             logging.warning('Cannot handle model %r', model_path)
             managed_obj = NullManagedObject(self._fps)
