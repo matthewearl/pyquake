@@ -84,22 +84,22 @@ class BlendMatImagePair:
 
 @dataclass(eq=False)
 class BlendMatImages:
-    texture_name: str
+    texture_name: Optional[str]
     frames: List[BlendMatImagePair]
     alt_frames: List[BlendMatImagePair]
 
     @classmethod
-    def from_single_diffuse(cls, texture_name: str, im: bpy.types.Image):
+    def from_single_diffuse(cls, im: bpy.types.Image):
         return cls(
-            texture_name,
+            None,
             frames=[BlendMatImagePair(im, None)],
             alt_frames=[]
         )
 
     @classmethod
-    def from_single_pair(cls, texture_name: str, im: bpy.types.Image, fullbright_im: bpy.types.Image):
+    def from_single_pair(cls, im: bpy.types.Image, fullbright_im: bpy.types.Image):
         return cls(
-            texture_name,
+            None,
             frames=[BlendMatImagePair(im, fullbright_im)],
             alt_frames=[]
         )
@@ -120,16 +120,21 @@ class BlendMatImages:
 @dataclass(eq=False)
 class BlendMat:
     mat: bpy.types.Material
-    _frame_input: Optional[bpy.types.NodeSocketFloatFactor]
-    _time_input: Optional[bpy.types.NodeSocketFloatFactor]
 
     def add_time_keyframe(self, time: float, blender_frame: int):
-        self._time_input.default_value = time
-        self._time_input.keyframe_insert('default_value', frame=blender_frame)
+        time_input = self.mat.node_tree.nodes['time'].outputs['Value']
+        time_input.default_value = time
+        time_input.keyframe_insert('default_value', frame=blender_frame)
+
+        fcurve = self.mat.node_tree.animation_data.action.fcurves.find(
+            'nodes["time"].outputs[0].default_value'
+        )
+        fcurve.keyframe_points[-1].interpolation = 'LINEAR'
 
     def add_frame_keyframe(self, frame: int, blender_frame: int):
-        self._frame_input.default_value = frame
-        self._frame_input.keyframe_insert('default_value', frame=blender_frame)
+        frame_input = self.mat.node_tree.nodes['frame'].outputs['Value']
+        frame_input.default_value = frame
+        frame_input.keyframe_insert('default_value', frame=blender_frame)
 
     def add_sample_as_light_keyframe(self, sample_as_light: bool, blender_frame: int):
         self.mat.cycles.sample_as_light = sample_as_light
@@ -137,11 +142,11 @@ class BlendMat:
 
     @property
     def is_animated(self):
-        return self._time_input is not None
+        return 'time' in self.mat.node_tree.nodes
 
     @property
     def is_posable(self):
-        return self._frame_input is not None
+        return 'frame' in self.mat.node_tree.nodes
 
 
 def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -> \
@@ -169,7 +174,9 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
 
         mul_node = nodes.new('ShaderNodeMath')
         mul_node.operation = 'MULTIPLY'
-        mul_node.inputs[1].default_value = 10
+        # empirically measured frame time to be 0.24s
+        # TODO: Find out why this is the case in the Quake source code.
+        mul_node.inputs[1].default_value = 1. / 0.24
         time_input = mul_node.inputs[0]
 
         mod_node = nodes.new('ShaderNodeMath')
@@ -246,29 +253,33 @@ def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False)
     return out
 
 
-def _create_value_node(inputs, nodes, links):
+def _create_value_node(inputs, nodes, links, name):
     value_node = nodes.new('ShaderNodeValue')
+    value_node.name = name
     for inp in inputs:
         links.new(inp, value_node.outputs['Value'])
-    return value_node.outputs['Value']
+
+
+def _create_inputs(frame_inputs, time_inputs, nodes, links):
+    if len(frame_inputs) > 0:
+        _create_value_node(frame_inputs, nodes, links, 'frame')
+    if len(time_inputs) > 0:
+        _create_value_node(time_inputs, nodes, links, 'time')
 
 
 def setup_diffuse_material(ims: BlendMatImages, mat_name: str):
     mat, nodes, links = _new_mat(mat_name)
 
     im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, fullbright=False)
-
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
     links.new(diffuse_node.inputs['Color'], im_output)
     links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
 
-    return BlendMat(
-        mat,
-        _create_value_node(time_inputs, nodes, links) if time_inputs else None,
-        _create_value_node(frame_inputs, nodes, links) if frame_inputs else None
-    )
+    _create_inputs(frame_inputs, time_inputs, nodes, links)
+
+    return BlendMat(mat)
 
 
 def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float):
@@ -296,11 +307,9 @@ def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: floa
     links.new(add_node.inputs[1], emission_node.outputs['Emission'])
     links.new(output_node.inputs['Surface'], add_node.outputs['Shader'])
 
-    return BlendMat(
-        mat,
-        _create_value_node(time_inputs, nodes, links) if time_inputs else None,
-        _create_value_node(frame_input, nodes, links) if frame_inputs else None
-    )
+    _create_inputs(frame_inputs, time_inputs, nodes, links)
+
+    return BlendMat(mat)
 
 
 def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float):
@@ -328,8 +337,6 @@ def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, st
     links.new(mix_node.inputs[2], emission_node.outputs['Emission'])
     links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
 
-    return BlendMat(
-        mat,
-        _create_value_node(time_inputs, nodes, links) if time_inputs else None,
-        _create_value_node(frame_inputs, nodes, links) if frame_inputs else None
-    )
+    _create_inputs(frame_inputs, time_inputs, nodes, links)
+
+    return BlendMat(mat)

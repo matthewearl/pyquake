@@ -93,7 +93,7 @@ def _set_uvs(mesh, am, tri_set):
 
         for bm_loop, (s, t) in zip(bm_face.loops, tcs):
             bm_loop[uv_layer].uv = s / am.header['skin_width'], t / am.header['skin_height']
-            
+
     bm.to_mesh(mesh)
 
 

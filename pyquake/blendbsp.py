@@ -23,7 +23,8 @@ import collections
 import functools
 import logging
 import operator
-from typing import NamedTuple, Optional, Any, Dict, Set
+from dataclasses import dataclass
+from typing import NamedTuple, Optional, Any, Dict, Set, List
 
 import bpy
 import bpy_types
@@ -96,7 +97,7 @@ class _MaterialApplier:
         self.sample_as_light_info = collections.defaultdict(lambda: collections.defaultdict(dict))
         self._all_textures: Dict[str, Texture] = texture_dict
         self.posable_mats: Dict[Model, Set[blendmat.BlendMat]] = collections.defaultdict(set)
-        self.animated_mats: Set[blendmat.BlendMat] = {}
+        self.animated_mats: Set[blendmat.BlendMat] = set()
 
     def _load_image(self, texture):
         tex_cfg = _get_texture_config(texture, self._map_cfg)
@@ -132,11 +133,11 @@ class _MaterialApplier:
         leaf_str = "" if leaf is None else f"leaf_{leaf.id_}_"
         model_str = "" if model is None else f"model_{model.id_}_"
         fullbright_str = "fullbright" if fullbright else "main"
-        return f"{images.texture_name}_{leaf_str}{model_str}_{fullbright_str}"
+        return f"{texture_name}_{leaf_str}{model_str}{fullbright_str}"
 
     def _load_material(self, images, leaf, model):
         mat_name = self._get_mat_name(images.texture_name, leaf, model, False)
-        tex_cfg = _get_texture_config(texture, self._map_cfg)
+        tex_cfg = _get_texture_config(images.texture_name, self._map_cfg)
 
         if images.any_fullbright and (
                 not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
@@ -144,7 +145,7 @@ class _MaterialApplier:
         else:
             bmat = blendmat.setup_diffuse_material(images, mat_name)
 
-        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(texture, "main")
+        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(images, "main")
 
         return bmat
 
@@ -155,7 +156,7 @@ class _MaterialApplier:
         tex_cfg = _get_texture_config(images.texture_name, self._map_cfg)
 
         bmat = blendmat.setup_transparent_fullbright_material(images, mat_name, tex_cfg['strength'])
-        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(texture, "fullbright")
+        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(images, "fullbright")
 
         return bmat
 
@@ -179,7 +180,7 @@ class _MaterialApplier:
             texture = bsp_face.tex_info.texture
             images = self._load_anim_images(texture)
             tex_cfg = _get_texture_config(texture.name, self._map_cfg)
-            if self._get_sample_as_light(texture, mat_type):
+            if self._get_sample_as_light(images, mat_type):
                 # Use a different material for each leaf
                 bmat = self._get_material(mat_type, images, bsp_face.leaf,
                                           model if images.is_posable else None)
@@ -189,7 +190,6 @@ class _MaterialApplier:
                 bmat = self._get_material(mat_type, images, None,
                                           model if images.is_posable else None)
 
-            # TODO: Add bmat to bb._posable_mats, bb._animated_mats
             assert bmat.is_posable == images.is_posable
             assert bmat.is_animated == images.is_animated
             if bmat.is_posable:
@@ -384,7 +384,8 @@ def _load_object(model_id, model, map_name, mat_applier, obj_name_prefix):
     return obj
 
 
-class BlendBsp(NamedTuple):
+@dataclass
+class BlendBsp:
     bsp: Bsp
     map_obj: bpy_types.Object
     model_objs: Dict[int, bpy_types.Object]
@@ -403,7 +404,7 @@ class BlendBsp(NamedTuple):
         bpy.context.scene.collection.objects.link(obj)
         obj.parent = self.map_obj
 
-    def add_material_frame_keyframe(self, model, frame_num, blender_frame)
+    def add_material_frame_keyframe(self, model, frame_num, blender_frame):
         for bmat in self._posable_mats[model]:
             bmat.add_frame_keyframe(frame_num, blender_frame)
 
@@ -481,4 +482,4 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     _add_lights(map_cfg.get('lights', {}), map_obj, obj_name_prefix)
 
     return BlendBsp(bsp, map_obj, model_objs, fullbright_objects, sample_as_light_info,
-                    mat_applier._posable_mats, mat_applier._animated_mats)
+                    mat_applier.posable_mats, mat_applier.animated_mats)
