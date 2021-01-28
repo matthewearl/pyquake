@@ -198,12 +198,14 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=No
                 bm = blendmat.setup_fullbright_material(
                     blendmat.BlendMatImages.from_single_pair(im, fullbright_im),
                     mat_name,
-                    strength
+                    strength,
+                    warp=False
                 )
             else:
                 bm = blendmat.setup_diffuse_material(
                     blendmat.BlendMatImages.from_single_diffuse(im),
-                    mat_name
+                    mat_name,
+                    warp=False
                 )
             bm.mat.cycles.sample_as_light = sample_as_light
 

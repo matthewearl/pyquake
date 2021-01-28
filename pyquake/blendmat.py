@@ -87,6 +87,14 @@ class BlendMatImages:
     frames: List[BlendMatImagePair]
     alt_frames: List[BlendMatImagePair]
 
+    @property
+    def width(self):
+        return self.frames[0].im.size[0]
+
+    @property
+    def height(self):
+        return self.frames[0].im.size[1]
+
     @classmethod
     def from_single_diffuse(cls, im: bpy.types.Image):
         return cls(
@@ -146,6 +154,58 @@ class BlendMat:
         return 'frame' in self.mat.node_tree.nodes
 
 
+def _setup_warp_uv_single(nodes, links, dim1_output, dim2_output, size1, size2):
+    mul_node = nodes.new('ShaderNodeMath')
+    mul_node.operation = 'MULTIPLY'
+    mul_node.inputs[1].default_value = size2 * 2 * np.pi / 128
+    links.new(mul_node.inputs[0], dim2_output)
+
+    add_node = nodes.new('ShaderNodeMath')
+    add_node.operation = 'ADD'
+    links.new(add_node.inputs[0], mul_node.outputs['Value'])
+
+    sine_node = nodes.new('ShaderNodeMath')
+    sine_node.operation = 'SINE'
+    links.new(sine_node.inputs[0], add_node.outputs['Value'])
+
+    mul2_node = nodes.new('ShaderNodeMath')
+    mul2_node.operation = 'MULTIPLY'
+    mul2_node.inputs[1].default_value = 8 / size1
+    links.new(mul2_node.inputs[0], sine_node.outputs['Value'])
+
+    add2_node = nodes.new('ShaderNodeMath')
+    add2_node.operation = 'ADD'
+    links.new(add2_node.inputs[0], mul2_node.outputs['Value'])
+    links.new(add2_node.inputs[1], dim1_output)
+
+    return [add_node.inputs[1]], add2_node.outputs['Value']
+
+
+def _setup_warp_uv(nodes, links, width, height):
+    uv_node = nodes.new('ShaderNodeUVMap')
+
+    sep_node = nodes.new('ShaderNodeSeparateXYZ')
+    links.new(sep_node.inputs['Vector'], uv_node.outputs['UV'])
+
+    u_time_inputs, u_output = _setup_warp_uv_single(
+        nodes, links,
+        sep_node.outputs['X'], sep_node.outputs['Y'],
+        width, height
+    )
+
+    v_time_inputs, v_output = _setup_warp_uv_single(
+        nodes, links,
+        sep_node.outputs['Y'], sep_node.outputs['X'],
+        height, width
+    )
+
+    combine_node = nodes.new('ShaderNodeCombineXYZ')
+    links.new(combine_node.inputs['X'], u_output)
+    links.new(combine_node.inputs['Y'], v_output)
+
+    return u_time_inputs + v_time_inputs, combine_node.outputs['Vector']
+
+
 def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -> \
         Tuple[bpy.types.NodeSocketColor, List[bpy.types.NodeSocketFloatFactor]]:
     texture_nodes = []
@@ -160,9 +220,13 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
 
     if len(texture_nodes) == 1:
         if texture_nodes[0] is None:
-            out = None, []
+            time_inputs = []
+            uv_inputs = []
+            colour_output = None
         else:
-            out = texture_nodes[0].outputs['Color'], []
+            time_inputs = []
+            uv_inputs = [texture_nodes[0].inputs['Vector']]
+            colour_output = texture_nodes[0].outputs['Color']
     elif len(texture_nodes) > 1:
         if texture_nodes[0] is None:
             prev_output = None
@@ -206,27 +270,32 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
 
             prev_output = mix_node.outputs['Color']
 
-        out = prev_output, [time_input]
+        time_inputs = [time_input]
+        uv_inputs = [tn.inputs['Vector'] for tn in texture_nodes if tn is not None]
+        colour_output = prev_output
     else:
         raise ValueError('No images passed')
 
-    return out
+    return time_inputs, uv_inputs, colour_output
 
 
-def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False) -> \
+def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, warp: bool, fullbright: bool) -> \
         Tuple[bpy.types.NodeSocketColor,
               List[bpy.types.NodeSocketFloatFactor],
               List[bpy.types.NodeSocketFloatFactor]]:
-    main_output, main_time_inputs = _setup_image_nodes(
+    main_time_inputs, main_uv_inputs, main_output = _setup_image_nodes(
         ((im_pair.fullbright_im if fullbright else im_pair.im)
             for im_pair in ims.frames),
         nodes, links
     )
 
+    time_inputs = main_time_inputs
+    uv_inputs = main_uv_inputs
+    frame_inputs = []
     if not ims.alt_frames:
-        out = main_output, main_time_inputs, []
+        output = main_output
     else:
-        alt_output, alt_time_inputs = _setup_image_nodes(
+        alt_time_inputs, alt_uv_inputs, alt_output = _setup_image_nodes(
             ((im_pair.fullbright_im if fullbright else im_pair.im)
                 for im_pair in ims.alt_frames),
             nodes, links
@@ -243,11 +312,18 @@ def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, fullbright: False)
         else:
             mix_node.inputs['Color2'].default_value = (0, 0, 0, 1)
 
-        out = (mix_node.outputs['Color'],
-               main_time_inputs + alt_time_inputs,
-               [mix_node.inputs['Fac']])
+        output = mix_node.outputs['Color']
+        time_inputs += alt_time_inputs
+        uv_inputs += alt_uv_inputs
+        frame_inputs += [mix_node.inputs['Fac']]
 
-    return out
+    if warp:
+        warp_time_inputs, uv_output = _setup_warp_uv(nodes, links, ims.width, ims.height)
+        for uv_input in uv_inputs:
+            links.new(uv_input, uv_output)
+        time_inputs += warp_time_inputs
+
+    return output, time_inputs, frame_inputs
 
 
 def _create_value_node(inputs, nodes, links, name):
@@ -264,10 +340,10 @@ def _create_inputs(frame_inputs, time_inputs, nodes, links):
         _create_value_node(time_inputs, nodes, links, 'time')
 
 
-def setup_diffuse_material(ims: BlendMatImages, mat_name: str):
+def setup_diffuse_material(ims: BlendMatImages, mat_name: str, warp: bool):
     mat, nodes, links = _new_mat(mat_name)
 
-    im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, fullbright=False)
+    im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, warp=warp, fullbright=False)
     diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
@@ -279,14 +355,14 @@ def setup_diffuse_material(ims: BlendMatImages, mat_name: str):
     return BlendMat(mat)
 
 
-def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float):
+def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float, warp: bool):
     mat, nodes, links = _new_mat(mat_name)
 
     diffuse_im_output, diffuse_time_inputs, diffuse_frame_inputs = _setup_alt_image_nodes(
-        ims, nodes, links, fullbright=False
+        ims, nodes, links, warp=warp, fullbright=False
     )
     fullbright_im_output, fullbright_time_inputs, fullbright_frame_inputs = _setup_alt_image_nodes(
-            ims, nodes, links, fullbright=True
+            ims, nodes, links, warp=warp, fullbright=True
     )
     time_inputs = diffuse_time_inputs + fullbright_time_inputs
     frame_inputs = diffuse_frame_inputs + fullbright_frame_inputs
@@ -309,14 +385,14 @@ def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: floa
     return BlendMat(mat)
 
 
-def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float):
+def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float, warp: bool):
     mat, nodes, links = _new_mat(mat_name)
 
     diffuse_im_output, diffuse_time_inputs, diffuse_frame_inputs = _setup_alt_image_nodes(
-        ims, nodes, links, fullbright=False
+        ims, nodes, links, warp=warp, fullbright=False
     )
     fullbright_im_output, fullbright_time_inputs, fullbright_frame_inputs = _setup_alt_image_nodes(
-        ims, nodes, links, fullbright=True
+        ims, nodes, links, warp=warp, fullbright=True
     )
     time_inputs = diffuse_time_inputs + fullbright_time_inputs
     frame_inputs = diffuse_frame_inputs + fullbright_frame_inputs

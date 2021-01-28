@@ -135,7 +135,7 @@ class _MaterialApplier:
         return True
 
     @functools.lru_cache(None)
-    def _get_material(self, mat_name, mat_type, texture, images):
+    def _get_material(self, mat_name, mat_type, texture, images, warp):
         if not self._map_cfg['fullbright_object_overlay']:
             assert mat_type == "main"
 
@@ -144,12 +144,12 @@ class _MaterialApplier:
         if mat_type == "main":
             if images.any_fullbright and (
                     not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
-                bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'])
+                bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'], warp)
             else:
-                bmat = blendmat.setup_diffuse_material(images, mat_name)
+                bmat = blendmat.setup_diffuse_material(images, mat_name, warp)
         else:
             assert images.any_fullbright, "Should only be called with fullbright textures"
-            bmat = blendmat.setup_transparent_fullbright_material(images, mat_name, tex_cfg['strength'])
+            bmat = blendmat.setup_transparent_fullbright_material(images, mat_name, tex_cfg['strength'], warp)
         return bmat
 
     def apply(self, model, mesh, bsp_faces, mat_type):
@@ -161,19 +161,21 @@ class _MaterialApplier:
             images = self._load_anim_images(texture)
             tex_cfg = _get_texture_config(texture, self._map_cfg)
             sample_as_light = self._get_sample_as_light(texture, images, mat_type)
+            warp = texture.name.startswith('*')
+
             mat_name = _get_mat_name(texture,
                                      bsp_face.leaf if sample_as_light else None,
                                      model if images.is_posable else None,
                                      mat_type)
 
-            bmat = self._get_material(mat_name, mat_type, texture, images)
+            bmat = self._get_material(mat_name, mat_type, texture, images, warp)
 
             if sample_as_light:
                 self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
             bmat.mat.cycles.sample_as_light = sample_as_light
 
             assert bmat.is_posable == images.is_posable
-            assert bmat.is_animated == images.is_animated
+            assert bmat.is_animated == (warp or images.is_animated)
             if bmat.is_posable:
                 self.posable_mats[model].add(bmat)
             if bmat.is_animated:
