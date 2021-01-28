@@ -58,9 +58,15 @@ def _set_uvs(mesh, texinfos, faces):
     bm.to_mesh(mesh)
 
 
-def _get_texture_config(texture_name, map_cfg):
+def _get_mat_name(texture, leaf, model, mat_type):
+    leaf_str = "" if leaf is None else f"leaf_{leaf.id_}_"
+    model_str = "" if model is None else f"model_{model.id_}_"
+    return f"{texture.name}_{leaf_str}{model_str}{mat_type}"
+
+
+def _get_texture_config(texture, map_cfg):
     cfg = dict(map_cfg['textures']['__default__'])
-    cfg.update(map_cfg['textures'].get(texture_name, {}))
+    cfg.update(map_cfg['textures'].get(texture.name, {}))
     return cfg
 
 
@@ -113,15 +119,14 @@ class _MaterialApplier:
     def _load_anim_images(self, texture: Texture) -> blendmat.BlendMatImages:
         main_textures, alt_textures = _get_anim_textures(texture, self._all_textures)
         return blendmat.BlendMatImages(
-            texture.name,
             frames=[self._load_image(tex) for tex in main_textures],
             alt_frames=[self._load_image(tex) for tex in alt_textures]
         )
 
-    def _get_sample_as_light(self, images, mat_type):
+    def _get_sample_as_light(self, texture, images, mat_type):
         if not images.any_fullbright:
             return False
-        tex_cfg = _get_texture_config(images.texture_name, self._map_cfg)
+        tex_cfg = _get_texture_config(texture, self._map_cfg)
         if not tex_cfg['sample_as_light']:
             return False
         overlay_enabled = self._map_cfg['fullbright_object_overlay']
@@ -129,47 +134,22 @@ class _MaterialApplier:
             return False
         return True
 
-    def _get_mat_name(self, texture_name, leaf, model, fullbright):
-        leaf_str = "" if leaf is None else f"leaf_{leaf.id_}_"
-        model_str = "" if model is None else f"model_{model.id_}_"
-        fullbright_str = "fullbright" if fullbright else "main"
-        return f"{texture_name}_{leaf_str}{model_str}{fullbright_str}"
-
-    def _load_material(self, images, leaf, model):
-        mat_name = self._get_mat_name(images.texture_name, leaf, model, False)
-        tex_cfg = _get_texture_config(images.texture_name, self._map_cfg)
-
-        if images.any_fullbright and (
-                not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
-            bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'])
-        else:
-            bmat = blendmat.setup_diffuse_material(images, mat_name)
-
-        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(images, "main")
-
-        return bmat
-
-    def _load_fullbright_obj_material(self, images, leaf, model):
-        assert images.any_fullbright, "Should only be called with fullbright textures"
-
-        mat_name = self._get_mat_name(images.texture_name, leaf, model, True)
-        tex_cfg = _get_texture_config(images.texture_name, self._map_cfg)
-
-        bmat = blendmat.setup_transparent_fullbright_material(images, mat_name, tex_cfg['strength'])
-        bmat.mat.cycles.sample_as_light = self._get_sample_as_light(images, "fullbright")
-
-        return bmat
-
     @functools.lru_cache(None)
-    def _get_material(self, mat_type, images, leaf, model):
+    def _get_material(self, mat_name, mat_type, texture, images):
         if not self._map_cfg['fullbright_object_overlay']:
             assert mat_type == "main"
+
+        tex_cfg = _get_texture_config(texture, self._map_cfg)
+
         if mat_type == "main":
-            bmat = self._load_material(images, leaf, model)
-        elif mat_type == "fullbright":
-            bmat = self._load_fullbright_obj_material(images, leaf, model)
+            if images.any_fullbright and (
+                    not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
+                bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'])
+            else:
+                bmat = blendmat.setup_diffuse_material(images, mat_name)
         else:
-            raise ValueError(f"Invalid mat_type {mat_type}")
+            assert images.any_fullbright, "Should only be called with fullbright textures"
+            bmat = blendmat.setup_transparent_fullbright_material(images, mat_name, tex_cfg['strength'])
         return bmat
 
     def apply(self, model, mesh, bsp_faces, mat_type):
@@ -179,16 +159,18 @@ class _MaterialApplier:
         for mesh_poly, bsp_face in zip(mesh.polygons, bsp_faces):
             texture = bsp_face.tex_info.texture
             images = self._load_anim_images(texture)
-            tex_cfg = _get_texture_config(texture.name, self._map_cfg)
-            if self._get_sample_as_light(images, mat_type):
-                # Use a different material for each leaf
-                bmat = self._get_material(mat_type, images, bsp_face.leaf,
-                                          model if images.is_posable else None)
+            tex_cfg = _get_texture_config(texture, self._map_cfg)
+            sample_as_light = self._get_sample_as_light(texture, images, mat_type)
+            mat_name = _get_mat_name(texture,
+                                     bsp_face.leaf if sample_as_light else None,
+                                     model if images.is_posable else None,
+                                     mat_type)
+
+            bmat = self._get_material(mat_name, mat_type, texture, images)
+
+            if sample_as_light:
                 self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
-            else:
-                # Single material
-                bmat = self._get_material(mat_type, images, None,
-                                          model if images.is_posable else None)
+            bmat.mat.cycles.sample_as_light = sample_as_light
 
             assert bmat.is_posable == images.is_posable
             assert bmat.is_animated == images.is_animated
@@ -315,7 +297,7 @@ def _load_fullbright_objects(model, map_name, pal, texture_dict, mat_applier, ma
         texinfo = face.tex_info
         texture = texinfo.texture
         bbox = bboxes.get(texture)
-        tex_cfg = _get_texture_config(texture.name, map_cfg)
+        tex_cfg = _get_texture_config(texture, map_cfg)
         if bbox is None or not tex_cfg['overlay']:
             continue
 

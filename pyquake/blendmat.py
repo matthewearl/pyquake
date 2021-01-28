@@ -84,14 +84,12 @@ class BlendMatImagePair:
 
 @dataclass(eq=False)
 class BlendMatImages:
-    texture_name: Optional[str]
     frames: List[BlendMatImagePair]
     alt_frames: List[BlendMatImagePair]
 
     @classmethod
     def from_single_diffuse(cls, im: bpy.types.Image):
         return cls(
-            None,
             frames=[BlendMatImagePair(im, None)],
             alt_frames=[]
         )
@@ -99,7 +97,6 @@ class BlendMatImages:
     @classmethod
     def from_single_pair(cls, im: bpy.types.Image, fullbright_im: bpy.types.Image):
         return cls(
-            None,
             frames=[BlendMatImagePair(im, fullbright_im)],
             alt_frames=[]
         )
