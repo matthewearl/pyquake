@@ -473,7 +473,7 @@ class ObjectManager:
             intersect = True
         return intersect
 
-    def _update_sample_as_light(self, view_origin, view_angles, blender_frame):
+    def _update_sample_as_light(self, view_origin, view_angles, blender_frame, crude_test=True):
         start = time.perf_counter()
         view_pvs = set(self._bb.bsp.models[0].get_leaf_from_point(view_origin).visible_leaves)
 
@@ -508,7 +508,7 @@ class ObjectManager:
                 vis = self._simplex_bbox_test(crude_bbox, view_sx)
 
             # Finally, check if any of the individual bboxes intersects the view frustum.
-            if vis:
+            if not crude_test and vis:
                 for bbox in bboxes:
                     num_tests += 1
                     if self._simplex_bbox_test(bbox, view_sx):
@@ -649,8 +649,6 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 updated.add(parsed.entity_num)
 
         if time is not None and entities and not demo_done:
-            if time > 4:
-                break
             logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
             last_time = time

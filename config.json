@@ -133,15 +133,42 @@
                 },
                 "sliplite": {
                     "strength": 100,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 },
                 "slipside": {
                     "strength": 100,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 },
                 "+0basebtn": {
                     "strength": 1000,
                     "sample_as_light": false
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [0.102, -0.454, -0.026],
+                    "location": [0, 0, 0]
+                },
+                "light78": {
+                    "type": "POINT",
+                    "location": [800.0, 2816.0, 24.0],
+                    "energy": 20.0
+                },
+                "light95": {
+                    "type": "POINT",
+                    "location": [832.0, 2360.0, 112.0],
+                    "energy": 100.0
+                },
+                "light108": {
+                    "type": "POINT",
+                    "location": [832.0, 2104.0, -208.0],
+                    "energy": 20
                 }
             }
         },
