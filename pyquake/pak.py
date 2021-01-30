@@ -24,6 +24,7 @@ __all__ = (
 )
 
 
+import argparse
 import collections
 import collections.abc
 import glob
@@ -32,6 +33,7 @@ import logging
 import os
 import pathlib
 import struct
+import sys
 
 
 logger = logging.getLogger(__name__)
@@ -42,55 +44,63 @@ class MalformedPakFile(Exception):
     pass
 
 
+def _read(f, n):
+    b = f.read(n)
+    if len(b) < n:
+        raise MalformedPakFile("File ended unexpectedly")
+    return b
+
+
+def _read_fname(f):
+    fname = _read(f, 56)
+    if b'\0' in fname:
+        fname = fname[:fname.index(b'\0')]
+    return fname.decode('ascii')
+
+
+def _read_header(f):
+    try:
+        magic = _read(f, 4)
+        if magic != b"PACK":
+            raise MalformedPakFile("Invalid magic number")
+        return struct.unpack("<II", _read(f, 8))
+    except EOFError:
+        raise MalformedPakFile("File too short")
+
+
+def _generate_entries(pak_file):
+    with open(pak_file, "rb") as f:
+        logger.info("Reading %s", pak_file)
+        file_table_offset, file_table_size = _read_header(f)
+        f.seek(file_table_offset)
+        i = 0
+        while i < file_table_size:
+            fname = _read_fname(f)
+            logger.debug("Indexed %s", fname)
+            offset, size = struct.unpack("<II", _read(f, 8))
+            yield fname, _PakEntry(pak_file, offset, size)
+            i += 64
+
+
+def _read_entry(entry):
+    with open(entry.pak_file, "rb") as f:
+        f.seek(entry.offset)
+        return _read(f, entry.size)
+
+
 class Filesystem(collections.abc.Mapping):
     """Interface to a .pak file based filesystem."""
-
-    def _read(self, f, n):
-        b = f.read(n)
-        if len(b) < n:
-            raise MalformedPakFile("File ended unexpectedly")
-        return b
-
-    def _read_fname(self, f):
-        fname = self._read(f, 56)
-        if b'\0' in fname:
-            fname = fname[:fname.index(b'\0')]
-        return fname.decode('ascii')
-
-    def _read_header(self, f):
-        try:
-            magic = self._read(f, 4)
-            if magic != b"PACK":
-                raise MalformedPakFile("Invalid magic number")
-            return struct.unpack("<II", self._read(f, 8))
-        except EOFError:
-            raise MalformedPakFile("File too short")
-
-    def _generate_entries(self, pak_file):
-        with open(pak_file, "rb") as f:
-            logger.info("Reading %s", pak_file)
-            file_table_offset, file_table_size = self._read_header(f)
-            f.seek(file_table_offset)
-            i = 0
-            while i < file_table_size:
-                fname = self._read_fname(f)
-                logger.debug("Indexed %s", fname)
-                offset, size = struct.unpack("<II", self._read(f, 8))
-                yield fname, _PakEntry(pak_file, offset, size)
-                i += 64
 
     def __init__(self, game_dir):
         self._game_dir = pathlib.Path(game_dir).resolve()
 
         pak_files = sorted(glob.glob(os.path.join(game_dir, "*.pak")))
-        self._index = {fname: entry for pak_file in pak_files for fname, entry in self._generate_entries(pak_file)}
+        self._index = {fname: entry for pak_file in pak_files for fname, entry in _generate_entries(pak_file)}
 
     def __getitem__(self, fname):
         if fname in self._index:
             entry = self._index[fname]
-            with open(entry.pak_file, "rb") as f:
-                f.seek(entry.offset)
-                return self._read(f, entry.size)
+            return _read_entry(entry)
         else:
             file_path = (self._game_dir / fname).resolve()
             if self._game_dir not in file_path.parents:
@@ -107,6 +117,45 @@ class Filesystem(collections.abc.Mapping):
 
     def __len__(self):
         return len(self._index)
+
+
+def pak_extract_main():
+    parser = argparse.ArgumentParser(description='Extract / list pak archives')
+    parser.add_argument('-l', '--list', action='store_const',
+                        const=True, default=False,
+                        help='list archive contents')
+    parser.add_argument('-x', '--extract', action='store_const',
+                        const=True, default=False,
+                        help='extract archive contents')
+    parser.add_argument('pak_file_name', metavar='pak-file-name')
+    parser.add_argument('target_dir', metavar='target-dir', nargs='?')
+    parsed = parser.parse_args(sys.argv[1:])
+
+    if (parsed.list + parsed.extract) != 1:
+        parser.error('Exactly one of --list or --extract must be passed')
+
+    if parsed.list:
+        if parsed.target_dir is not None:
+            parser.error('target-dir should only be passed with extracting')
+
+        print(f'{"offset":>9}  {"size":>9}  {"filename"}')
+        print(f'{"-" * 9}  {"-" * 9}  {"-" * 12}')
+        for fname, entry in _generate_entries(parsed.pak_file_name):
+            print(f'{entry.offset:>9}  {entry.size:>9}  {fname}')
+
+    if parsed.extract:
+        target_dir = os.getcwd() if parsed.target_dir is None else parsed.target_dir
+        target_dir = os.path.join(target_dir, '')
+        for rel_path, entry in _generate_entries(parsed.pak_file_name):
+            abs_path = os.path.realpath(os.path.join(target_dir, rel_path))
+            if os.path.commonprefix((abs_path, target_dir)) != target_dir:
+                raise Exception(
+                    f'Directory traversal attack detected: {abs_path} is not in {target_dir}'
+                )
+
+            print(f'extracting {rel_path!r} to {abs_path!r}')
+            with open(abs_path, 'wb') as f:
+                f.write(_read_entry(entry))
 
 
 if __name__ == "__main__":
