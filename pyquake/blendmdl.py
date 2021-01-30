@@ -67,6 +67,10 @@ class BlendMdl:
             raise Exception("Cannot key-frame static models")
         self._update_pose(time, pose_num, fps)
 
+    def set_invisible_to_camera(self):
+        for sub_obj in self.sub_objs:
+            sub_obj.cycles_visibility.camera = False
+
     def done(self, final_time: float, fps: float):
         if self._group_pose_num is not None:
             loop_time = 0

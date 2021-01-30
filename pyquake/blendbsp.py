@@ -374,7 +374,7 @@ class BlendBsp:
     map_obj: bpy_types.Object
     model_objs: Dict[int, bpy_types.Object]
     fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
-    sample_as_light_info: Optional[Dict[Model, Dict[Leaf, Dict[blendmat.BlendMat, Dict]]]]
+    sample_as_light_info: Dict[Model, Dict[Leaf, Dict[blendmat.BlendMat, Dict]]]
     _posable_mats: Dict[Model, List[blendmat.BlendMat]]
     _animated_mats: List[blendmat.BlendMat]
 
@@ -461,7 +461,7 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     if mat_applier is not None:
         sample_as_light_info = mat_applier.sample_as_light_info
     else:
-        sample_as_light_info = None
+        sample_as_light_info = {}
 
     _add_lights(map_cfg.get('lights', {}), map_obj, obj_name_prefix)
 

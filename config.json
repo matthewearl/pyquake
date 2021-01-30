@@ -9,6 +9,11 @@
             "force_fullbright": true,
             "strength": 10
         },
+        "flame": {
+            "sample_as_light": true,
+            "strength": 10000,
+            "bbox": [[-256, -256, -256], [256, 256, 256]]
+        },
         "flame2": {
             "sample_as_light": true,
             "strength": 10000,
@@ -181,6 +186,16 @@
                     "sample_as_light": false,
                     "tint": [1, 1, 1, 1],
                     "overlay": true
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
                 }
             }
         },

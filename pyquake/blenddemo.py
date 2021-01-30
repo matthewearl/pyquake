@@ -203,6 +203,8 @@ class LeafSampleAsLightObject:
                 for leaf, leaf_info in model_info.items()
                 for mat, tex_cfg in leaf_info.items()
             )
+        else:
+            return []
 
 
 @dataclass
@@ -222,6 +224,9 @@ class ManagedObject:
         raise NotImplementedError
 
     def add_angles_keyframe(self, angles: Vec3, time: float):
+        raise NotImplementedError
+
+    def set_invisible_to_camera(self):
         raise NotImplementedError
 
     def done(self, final_time: float):
@@ -253,6 +258,9 @@ class AliasModelManagedObject(ManagedObject):
         if self.bm.am.header['flags'] & mdl.ModelFlags.ROTATE:
             self.bm.obj.rotation_euler.z = time * 100. * np.pi / 180
         self.bm.obj.keyframe_insert('rotation_euler', frame=self._get_blender_frame(time))
+
+    def set_invisible_to_camera(self):
+        self.bm.set_invisible_to_camera()
 
     def done(self, final_time: float):
         self.bm.done(final_time, self.fps)
@@ -583,6 +591,11 @@ class ObjectManager:
 
         for obj in self._objs.values():
             obj.done(final_time)
+
+        # Make the view entity invisible to camera rays
+        for (entity_num, model_num), obj in self._objs.items():
+            if entity_num == self._view_entity_num:
+                obj.set_invisible_to_camera()
 
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
