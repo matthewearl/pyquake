@@ -336,6 +336,7 @@ class ObjectManager:
         self._fov = fov
         demo_cam = bpy.data.cameras.new(name="demo_cam")
         demo_cam.angle = fov * np.pi / 180
+        demo_cam.clip_start = 0.04
         self._demo_cam_obj = bpy.data.objects.new(name="demo_cam", object_data=demo_cam)
         bpy.context.scene.collection.objects.link(self._demo_cam_obj)
         self._demo_cam_obj.parent = self.world_obj
