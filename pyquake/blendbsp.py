@@ -135,13 +135,17 @@ class _MaterialApplier:
         return True
 
     @functools.lru_cache(None)
-    def _get_material(self, mat_name, mat_type, texture, images, warp):
+    def _get_material(self, mat_name, mat_type, texture, images, warp, sky):
         if not self._map_cfg['fullbright_object_overlay']:
             assert mat_type == "main"
 
         tex_cfg = _get_texture_config(texture, self._map_cfg)
 
-        if mat_type == "main":
+        if sky:
+            assert mat_type == "main"
+            assert not warp
+            bmat = blendmat.setup_sky_material(images, mat_name)
+        elif mat_type == "main":
             if images.any_fullbright and (
                     not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
                 bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'], warp)
@@ -162,20 +166,21 @@ class _MaterialApplier:
             tex_cfg = _get_texture_config(texture, self._map_cfg)
             sample_as_light = self._get_sample_as_light(texture, images, mat_type)
             warp = texture.name.startswith('*')
+            sky = texture.name.startswith('sky')
 
             mat_name = _get_mat_name(texture,
                                      bsp_face.leaf if sample_as_light else None,
                                      model if images.is_posable else None,
                                      mat_type)
 
-            bmat = self._get_material(mat_name, mat_type, texture, images, warp)
+            bmat = self._get_material(mat_name, mat_type, texture, images, warp, sky)
 
             if sample_as_light:
                 self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
             bmat.mat.cycles.sample_as_light = sample_as_light
 
             assert bmat.is_posable == images.is_posable
-            assert bmat.is_animated == (warp or images.is_animated)
+            assert bmat.is_animated == (sky or warp or images.is_animated)
             if bmat.is_posable:
                 self.posable_mats[model].add(bmat)
             if bmat.is_animated:
@@ -191,8 +196,7 @@ class _MaterialApplier:
 def _get_visible_faces(model):
     return [(face_id, face)
             for face_id, face in zip(range(model.first_face_idx, model.first_face_idx + model.num_faces), model.faces)
-            if face.tex_info.texture.name != 'trigger'
-            if not face.tex_info.texture.name.startswith('sky')]
+            if face.tex_info.texture.name != 'trigger']
 
 
 def _get_bbox(a):
@@ -425,6 +429,7 @@ def load_bsp(pak_root, map_name, config):
 
 def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
+    pal[0, 3] = 0
 
     if map_name.startswith('b_'):
         map_cfg = config['maps']['__bsp_model__']

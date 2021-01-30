@@ -205,7 +205,7 @@
                 "light170": {
                     "type": "POINT",
                     "location": [880.0, -376.0, 304.0],
-                    "energy": 200.0
+                    "energy": 20.0
                 },
                 "light220": {
                     "type": "POINT",

@@ -23,6 +23,7 @@ __all__ = (
     'array_ims_from_indices',
     'im_from_array',
     'new_mat',
+    'setup_sky_material',
     'setup_diffuse_material',
     'setup_fullbright_material',
     'setup_transparent_fullbright_material',
@@ -338,6 +339,85 @@ def _create_inputs(frame_inputs, time_inputs, nodes, links):
         _create_value_node(frame_inputs, nodes, links, 'frame')
     if len(time_inputs) > 0:
         _create_value_node(time_inputs, nodes, links, 'time')
+
+
+def setup_sky_material(ims: BlendMatImages, mat_name):
+    image = ims.frames[0].im
+
+    mat, nodes, links = _new_mat(mat_name)
+
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+
+    mix_node = nodes.new('ShaderNodeMixShader')
+    links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
+
+    light_path_node = nodes.new('ShaderNodeLightPath')
+    transparent_node = nodes.new('ShaderNodeBsdfTransparent')
+    emission_node = nodes.new('ShaderNodeEmission')
+    emission_node.inputs['Strength'].default_value = 0.25
+    links.new(mix_node.inputs['Fac'], light_path_node.outputs['Is Camera Ray'])
+    links.new(mix_node.inputs[1], transparent_node.outputs['BSDF'])
+    links.new(mix_node.inputs[2], emission_node.outputs['Emission'])
+
+    mix_rgb_node = nodes.new('ShaderNodeMixRGB')
+    links.new(emission_node.inputs['Color'], mix_rgb_node.outputs['Color'])
+
+    front_texture_node = nodes.new('ShaderNodeTexImage')
+    front_texture_node.image = image
+    back_texture_node = nodes.new('ShaderNodeTexImage')
+    back_texture_node.image = image
+    links.new(mix_rgb_node.inputs['Color1'], back_texture_node.outputs['Color'])
+    links.new(mix_rgb_node.inputs['Color2'], front_texture_node.outputs['Color'])
+    links.new(mix_rgb_node.inputs['Fac'], front_texture_node.outputs['Alpha'])
+
+    wrap_back_node = nodes.new('ShaderNodeVectorMath')
+    wrap_front_node = nodes.new('ShaderNodeVectorMath')
+    wrap_back_node.operation = 'WRAP'
+    wrap_back_node.inputs[1].default_value = (0.5, 0, 0)
+    wrap_back_node.inputs[2].default_value = (1, 1, 1)
+    wrap_front_node.operation = 'WRAP'
+    wrap_front_node.inputs[1].default_value = (0, 0, 0)
+    wrap_front_node.inputs[2].default_value = (0.5, 1, 1)
+    links.new(back_texture_node.inputs['Vector'], wrap_back_node.outputs[0])
+    links.new(front_texture_node.inputs['Vector'], wrap_front_node.outputs[0])
+
+    add_back_node = nodes.new('ShaderNodeVectorMath')
+    add_front_node = nodes.new('ShaderNodeVectorMath')
+    add_back_node.operation = 'ADD'
+    add_front_node.operation = 'ADD'
+    links.new(wrap_back_node.inputs[0], add_back_node.outputs[0])
+    links.new(wrap_front_node.inputs[0], add_front_node.outputs[0])
+
+    vec_mul2_node = nodes.new('ShaderNodeVectorMath')
+    back_vel_node = nodes.new('ShaderNodeVectorMath')
+    front_vel_node = nodes.new('ShaderNodeVectorMath')
+    vec_mul2_node.operation = 'MULTIPLY'
+    back_vel_node.operation = 'MULTIPLY'
+    front_vel_node.operation = 'MULTIPLY'
+    vec_mul2_node.inputs[1].default_value = (3, 3, 3)
+    back_vel_node.inputs[1].default_value = (.125, .125, .125)
+    front_vel_node.inputs[1].default_value = (.25, .25, .25)
+    links.new(add_back_node.inputs[0], vec_mul2_node.outputs['Vector'])
+    links.new(add_front_node.inputs[0], vec_mul2_node.outputs['Vector'])
+    links.new(add_back_node.inputs[1], back_vel_node.outputs['Vector'])
+    links.new(add_front_node.inputs[1], front_vel_node.outputs['Vector'])
+
+    _create_value_node([back_vel_node.inputs[0], front_vel_node.inputs[0]],
+                       nodes, links, 'time')
+
+    normalize_node = nodes.new('ShaderNodeVectorMath')
+    normalize_node.operation = 'NORMALIZE'
+    links.new(vec_mul2_node.inputs[0], normalize_node.outputs['Vector'])
+
+    vec_mul_node = nodes.new('ShaderNodeVectorMath')
+    vec_mul_node.operation = 'MULTIPLY'
+    vec_mul_node.inputs[1].default_value = (-1, -1, -3)
+    links.new(normalize_node.inputs['Vector'], vec_mul_node.outputs['Vector'])
+
+    geometry_node = nodes.new('ShaderNodeNewGeometry')
+    links.new(vec_mul_node.inputs[0], geometry_node.outputs['Incoming'])
+
+    return BlendMat(mat)
 
 
 def setup_diffuse_material(ims: BlendMatImages, mat_name: str, warp: bool):
