@@ -594,7 +594,7 @@ class ObjectManager:
 
         # Make the view entity invisible to camera rays
         for (entity_num, model_num), obj in self._objs.items():
-            if entity_num == self._view_entity_num:
+            if entity_num == self._view_entity_num and model_num != 0:
                 obj.set_invisible_to_camera()
 
 
