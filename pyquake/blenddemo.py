@@ -618,7 +618,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
         time = None
         update_done = False
         updated = set()
-        prev_entities = entities
+        prev_entities = dict(entities)
 
         while not update_done:
             try:
