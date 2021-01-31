@@ -13,7 +13,7 @@ grammar_source = r"""
 ws = ( ' ' | '\t' )*
 string = '"' (~'"' anything)*:c '"' -> ''.join(c)
 
-texture_char = :x ?(x in (string.ascii_uppercase + string.digits) + '_*+') -> x
+texture_char = :x ?(x in (string.ascii_lowercase + string.ascii_uppercase + string.digits) + '_*+') -> x
 texture_name = texture_char+:c -> ''.join(c)
 
 digit = :x ?(x in '0123456789') -> x
