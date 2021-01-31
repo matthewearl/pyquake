@@ -12,12 +12,12 @@
         "flame": {
             "sample_as_light": true,
             "strength": 10000,
-            "bbox": [[-768, -768, -768], [768, 768, 768]]
+            "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
         },
         "flame2": {
             "sample_as_light": true,
             "strength": 10000,
-            "bbox": [[-768, -768, -768], [768, 768, 768]]
+            "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
         },
         "lavaball": {
             "sample_as_light": false,
