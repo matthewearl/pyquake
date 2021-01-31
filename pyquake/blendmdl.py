@@ -105,7 +105,7 @@ def _set_uvs(mesh, am, tri_set):
 
 
 def _simplify_pydata(verts, tris):
-    vert_map = [] 
+    vert_map = []
     new_tris = []
     for tri in tris:
         new_tri = []

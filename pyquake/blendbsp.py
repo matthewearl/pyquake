@@ -71,7 +71,7 @@ def _get_texture_config(texture, map_cfg):
 
 
 def _get_anim_textures(texture: Texture, texture_dict: Dict[str, Texture]) -> blendmat.BlendMatImages:
-    if texture.name.startswith('+0'):
+    if texture.name.startswith('+') and len(texture.name) >= 2 and texture.name[1].isdigit():
         main_textures = []
         for i in range(10):
             tex_name = f'+{i}{texture.name[2:]}'
