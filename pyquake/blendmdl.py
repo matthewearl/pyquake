@@ -18,6 +18,7 @@
 #     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import random
 from dataclasses import dataclass
 from typing import Dict, Set, List, Optional
 
@@ -76,7 +77,7 @@ class BlendMdl:
 
     def done(self, final_time: float, fps: float):
         if self._group_frame_times is not None:
-            loop_time = 0
+            loop_time = -random.random() * self._group_frame_times[-1]
             while loop_time < final_time:
                 for pose_num, offset in enumerate([0] + self._group_frame_times[:-1]):
                     self._update_pose(loop_time + offset, pose_num, fps)
