@@ -177,8 +177,12 @@ class LeafSampleAsLightObject:
                          self._leaf.bbox.maxs + tex_bbox[1]]) + self._model_origin
 
     @property
+    def _model(self):
+        return self._bb.bsp.models[self._model_num]
+
+    @property
     def _model_origin(self):
-        return np.array(self._bb.model_objs[self._model_idx].location)
+        return np.array(self._bb.model_objs[self._model].location)
 
     @property
     def leaf(self):
@@ -275,11 +279,16 @@ class BspModelManagedObject(ManagedObject):
         model = self._bb.bsp.models[self._model_num]
         self._bb.add_material_frame_keyframe(model, pose_num, self._get_blender_frame(time))
 
+    @property
+    def _model(self):
+        return self._bb.bsp.models[self._model_num]
+
     def add_visible_keyframe(self, visible: bool, time: float):
-        pass
+        blender_frame = self._get_blender_frame(time)
+        self._bb.add_visible_keyframe(self._model, visible, blender_frame)
 
     def add_origin_keyframe(self, origin: Vec3, time: float):
-        obj = self._bb.model_objs[self._model_num]
+        obj = self._bb.model_objs[self._model]
         obj.location = origin
         obj.keyframe_insert('location', frame=self._get_blender_frame(time))
 
@@ -363,6 +372,7 @@ class ObjectManager:
         logger.info('Adding bsp %s', map_path)
         self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
         self._bb.map_obj.parent = self.world_obj
+        self._bb.hide_all_but_main()
 
         self._sample_as_light_objects.extend(
             LeafSampleAsLightObject.create_from_bsp(self._bb)

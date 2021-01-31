@@ -21,6 +21,7 @@
 
 import collections
 import functools
+import itertools
 import logging
 import operator
 from dataclasses import dataclass
@@ -293,7 +294,7 @@ def _load_fullbright_objects(model, map_name, pal, texture_dict, mat_applier, ma
         if np.any(fullbright_array):
             bboxes[texture] = _get_bbox(fullbright_array)
 
-    fullbright_objects = {}
+    fullbright_objects = set()
 
     # For each fullbright face in the original BSP, create a set of new faces, one for each wrap of the texture image.
     # The new faces bounds the fullbright texels for that particular wrap of the texture
@@ -340,7 +341,7 @@ def _load_fullbright_objects(model, map_name, pal, texture_dict, mat_applier, ma
             obj = bpy.data.objects.new(obj_name, mesh)
             bpy.context.scene.collection.objects.link(obj)
 
-            fullbright_objects[face] = obj
+            fullbright_objects.add(obj)
 
             if mat_applier is not None:
                 texinfos = [face.tex_info for face in new_bsp_faces]
@@ -376,8 +377,8 @@ def _load_object(model_id, model, map_name, mat_applier, obj_name_prefix):
 class BlendBsp:
     bsp: Bsp
     map_obj: bpy_types.Object
-    model_objs: Dict[int, bpy_types.Object]
-    fullbright_objects: Optional[Dict[Face, bpy_types.Object]]
+    model_objs: Dict[Model, bpy_types.Object]
+    fullbright_objects: Dict[Model, Set[bpy_types.Object]]
     sample_as_light_info: Dict[Model, Dict[Leaf, Dict[blendmat.BlendMat, Dict]]]
     _posable_mats: Dict[Model, List[blendmat.BlendMat]]
     _animated_mats: List[blendmat.BlendMat]
@@ -392,6 +393,27 @@ class BlendBsp:
         bpy.context.scene.collection.objects.link(obj)
         obj.parent = self.map_obj
 
+    def hide_all_but_main(self):
+        for model in self.bsp.models[1:]:
+            objs = itertools.chain(
+                [self.model_objs[model]],
+                self.fullbright_objects[model]
+            )
+            for obj in objs:
+                obj.hide_render = True
+                obj.hide_viewport = True
+
+    def add_visible_keyframe(self, model, visible: bool, blender_frame: int):
+        objs = itertools.chain(
+            [self.model_objs[model]],
+            self.fullbright_objects[model]
+        )
+        for obj in objs:
+            obj.hide_render = not visible
+            obj.keyframe_insert('hide_render', frame=blender_frame)
+            obj.hide_viewport = not visible
+            obj.keyframe_insert('hide_viewport', frame=blender_frame)
+
     def add_material_frame_keyframe(self, model, frame_num, blender_frame):
         for bmat in self._posable_mats[model]:
             bmat.add_frame_keyframe(frame_num, blender_frame)
@@ -400,7 +422,6 @@ class BlendBsp:
         for bmat in self._animated_mats:
             bmat.add_time_keyframe(0., 0)
             bmat.add_time_keyframe(final_time, final_frame)
-        # TODO: Set interpolation to linear
 
 
 def _add_lights(lights_cfg, map_obj, obj_name_prefix):
@@ -444,24 +465,24 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     map_obj = bpy.data.objects.new(f'{obj_name_prefix}{map_name}', None)
     bpy.context.scene.collection.objects.link(map_obj)
 
-    fullbright_objects = {}
+    fullbright_objects: Dict[Model, Set[bpy_types.Object]] = collections.defaultdict(set)
     model_objs = {}
     for model_id, model in enumerate(bsp.models):
         model_obj = _load_object(model_id, model, map_name, mat_applier, obj_name_prefix)
         model_obj.parent = map_obj
-        model_objs[model_id] = model_obj
+        model_objs[model] = model_obj
 
         if map_cfg['fullbright_object_overlay']:
             model_fullbright_objects = _load_fullbright_objects(
                 model, map_name, pal, bsp.textures_by_name, mat_applier, map_cfg, obj_name_prefix
             )
         else:
-            model_fullbright_objects = {}
+            model_fullbright_objects = set()
 
-        for obj in model_fullbright_objects.values():
+        for obj in model_fullbright_objects:
             obj.parent = model_obj
 
-        fullbright_objects.update(model_fullbright_objects)
+        fullbright_objects[model] |= model_fullbright_objects
 
     if mat_applier is not None:
         sample_as_light_info = mat_applier.sample_as_light_info
