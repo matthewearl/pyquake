@@ -271,6 +271,33 @@
                 }
             }
         },
+        "e1m4": {
+            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                },
+                "light14": {
+                    "type": "POINT",
+                    "location": [696.0, 1112.0, 816.0],
+                    "energy": 300.0
+                }
+            }
+        },
         "e1m6": {
             "do_materials": true,
             "fullbright_object_overlay": true,
