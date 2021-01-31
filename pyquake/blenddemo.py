@@ -585,7 +585,7 @@ class ObjectManager:
 
         # Unhide objects that were updated this frame, or whose model changed.
         for entity_num in updated:
-            if (prev_updated is None or entity_num not in prev_updated or
+            if (entity_num not in prev_updated or
                 (entity_num in prev_entities and
                  prev_entities[entity_num].model_num != entities[entity_num].model_num)):
                 self._objs[entity_num, entities[entity_num].model_num].add_visible_keyframe(
@@ -594,7 +594,8 @@ class ObjectManager:
 
         # Pose camera
         view_origin = entities[self._view_entity_num].origin
-        view_origin = (view_origin[0], view_origin[1], view_origin[2] + _EYE_HEIGHT)
+        if not self._intermission:
+            view_origin = (view_origin[0], view_origin[1], view_origin[2] + _EYE_HEIGHT)
         self._demo_cam_obj.location = view_origin
         self._demo_cam_obj.keyframe_insert('location', frame=blender_frame)
         self._demo_cam_obj.rotation_euler = _quake_to_blender_angles(view_angles)
@@ -633,7 +634,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
     baseline_entities: Dict[int, _EntityInfo] = collections.defaultdict(lambda: _DEFAULT_BASELINE)
     entities: Dict[int, _EntityInfo] = {}
     fixed_view_angles: Vec3 = (0, 0, 0)
-    prev_updated = None
+    prev_updated = set()
     demo_done = False
     obj_mgr = ObjectManager(fs, config, fps, fov, width, height, world_obj_name, load_level)
     last_time = 0.
@@ -646,18 +647,18 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
         updated = set()
         prev_entities = dict(entities)
 
-        while not update_done:
+        while not update_done and not demo_done:
             try:
-                update_done, view_angles, parsed = next(msg_iter)
+                msg_end, view_angles, parsed = next(msg_iter)
             except StopIteration:
                 demo_done = True
                 break
 
+            update_done = msg_end and time is not None and entities
+
             fixed_view_angles = _fix_angles(fixed_view_angles, view_angles, degrees=True)
 
             if parsed.msg_type == proto.ServerMessageType.TIME:
-                if time is not None:
-                    raise Exception("Multiple time messages per update")
                 time = parsed.time
 
             if parsed.msg_type == proto.ServerMessageType.SERVERINFO:
@@ -695,11 +696,11 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                     proto.ServerMessageType.CUTSCENE):
                 obj_mgr.set_intermission(True)
 
-        if time is not None and entities and not demo_done:
+        if update_done:
             logger.debug('Handling update. time=%s', time)
             obj_mgr.update(time, prev_entities, entities, prev_updated, updated, fixed_view_angles)
             last_time = time
-        prev_updated = updated
+            prev_updated = updated
 
     obj_mgr.done(last_time)
 
