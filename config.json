@@ -298,6 +298,49 @@
                 }
             }
         },
+        "e1m5": {
+            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "metal6_3": {
+                    "strength": 50,
+                    "overlay": true,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                },
+                "light95": {
+                    "type": "POINT",
+                    "location": [-544.0, 1880.0, -196.0],
+                    "energy": 10.0
+                },
+                "light25": {
+                    "type": "POINT",
+                    "location": [-544.0, 1272.0, 368.0],
+                    "energy": 100.0
+                },
+                "light71": {
+                    "type": "POINT",
+                    "location": [700.0, 1676.0, 12.0],
+                    "energy": 5.0
+                }
+            }
+        },
         "e1m6": {
             "do_materials": true,
             "fullbright_object_overlay": true,
