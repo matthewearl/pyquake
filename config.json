@@ -22,6 +22,10 @@
         "lavaball": {
             "sample_as_light": false,
             "strength": 100
+        },
+        "boss": {
+            "sample_as_light": false,
+            "strength": 1
         }
     },
     "maps": {
@@ -295,6 +299,11 @@
                     "type": "POINT",
                     "location": [696.0, 1112.0, 816.0],
                     "energy": 300.0
+                },
+                "light16": {
+                    "type": "POINT",
+                    "location": [688.0, 496.0, 810.0],
+                    "energy": 25.0
                 }
             }
         },
@@ -405,6 +414,53 @@
                     "type": "POINT",
                     "location": [480.0, 920.0, 104.0],
                     "energy": 50.0
+                }
+            }
+        },
+        "e1m7": {
+            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "*lava1": {
+                    "strength": 100,
+                    "sample_as_light": false
+                },
+                "rune_a": {
+                    "strength": 50,
+                    "overlay": true,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.353, 0.259, 0.376],
+                    "location": [0, 0, 0]
+                },
+                "light8": {
+                    "type": "POINT",
+                    "location": [-256.0, 64.0, 120.0],
+                    "energy": 50
+                },
+                "light59": {
+                    "type": "POINT",
+                    "location": [840.0, 56.0, -288.0],
+                    "energy": 25
+                },
+                "light55": {
+                    "type": "POINT",
+                    "location": [840.0, 64.0, -976.0],
+                    "energy": 10.0
                 }
             }
         },
