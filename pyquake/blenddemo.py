@@ -335,6 +335,7 @@ class ObjectManager:
         self._sample_as_light_objects: List[SampleAsLightObject] = []
         self._sal_time: float = 0.
         self._first_update_time: Optional[float] = None
+        self._intermission = False
 
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
@@ -350,6 +351,9 @@ class ObjectManager:
         self._demo_cam_obj = bpy.data.objects.new(name="demo_cam", object_data=demo_cam)
         bpy.context.scene.collection.objects.link(self._demo_cam_obj)
         self._demo_cam_obj.parent = self.world_obj
+
+    def set_intermission(self, i: bool):
+        self._intermission = i
 
     @functools.lru_cache(1024)
     def _leaf_from_pos(self, pos):
@@ -551,6 +555,9 @@ class ObjectManager:
     def update(self, time, prev_entities, entities, prev_updated, updated, view_angles):
         blender_frame = int(round(self._fps * time))
 
+        if self._intermission:
+            view_angles = tuple(x * 180 / np.pi for x in entities[self._view_entity_num].angles)
+
         # Hide any objects that weren't updated in this frame, or whose model changed.
         for entity_num in prev_updated:
             if (prev_entities[entity_num].model_num != entities[entity_num].model_num
@@ -681,6 +688,12 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 prev_info = entities.get(parsed.entity_num, baseline)
                 entities[parsed.entity_num] = prev_info.update(parsed, baseline)
                 updated.add(parsed.entity_num)
+
+            if parsed.msg_type in (
+                    proto.ServerMessageType.INTERMISSION,
+                    proto.ServerMessageType.FINALE,
+                    proto.ServerMessageType.CUTSCENE):
+                obj_mgr.set_intermission(True)
 
         if time is not None and entities and not demo_done:
             logger.debug('Handling update. time=%s', time)
