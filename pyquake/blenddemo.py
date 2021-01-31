@@ -178,7 +178,7 @@ class LeafSampleAsLightObject:
 
     @property
     def _model(self):
-        return self._bb.bsp.models[self._model_num]
+        return self._bb.bsp.models[self._model_idx]
 
     @property
     def _model_origin(self):
