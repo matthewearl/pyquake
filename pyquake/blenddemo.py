@@ -393,7 +393,7 @@ class ObjectManager:
                                 f"static{len(self._static_objects)}",
                                 skin,
                                 mdl_cfg,
-                                static_pose_num=frame)
+                                frame)
         bm.obj.parent = self.world_obj
         bm.obj.location = origin
         bm.obj.rotation_euler = (0., 0., angles[1])
@@ -406,7 +406,7 @@ class ObjectManager:
             )
 
 
-    def _create_managed_object(self, entity_num, model_num, skin_num):
+    def _create_managed_object(self, entity_num, model_num, skin_num, initial_pose_num):
         model_path = self._model_paths[model_num - 1] if model_num != 0 else None
 
         if model_num == 0:
@@ -425,7 +425,8 @@ class ObjectManager:
                                     mdl_name,
                                     f'ent{entity_num}_{mdl_name}',
                                     skin_num,
-                                    mdl_cfg)
+                                    mdl_cfg,
+                                    initial_pose_num)
             bm.obj.parent = self.world_obj
             managed_obj = AliasModelManagedObject(self._fps, bm)
         elif model_path.endswith('.bsp'):
@@ -553,7 +554,7 @@ class ObjectManager:
             model_num = entities[entity_num].model_num
             key = entity_num, model_num
             if key not in self._objs:
-                obj = self._create_managed_object(entity_num, model_num, ent.skin)
+                obj = self._create_managed_object(entity_num, model_num, ent.skin, ent.frame)
                 obj.add_visible_keyframe(False, 0)
                 self._objs[key] = obj
             else:

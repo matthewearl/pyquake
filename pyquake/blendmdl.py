@@ -39,8 +39,8 @@ class BlendMdl:
     sub_objs: List[bpy_types.Object]
     sample_as_light_mats: Set[blendmat.BlendMat]
 
-    _group_pose_num: Optional[int]
-    _times: Optional[List[float]]
+    _initial_pose_num: int
+    _group_frame_times: Optional[List[float]]
     _shape_keys: List[List[bpy.types.ShapeKey]]
     _current_pose_num: Optional[int] = None
     _last_time: Optional[float] = None
@@ -63,21 +63,24 @@ class BlendMdl:
             self._last_time = time
 
     def add_pose_keyframe(self, pose_num: int, time: float, fps: float):
-        if self._group_pose_num is not None:
-            raise Exception("Cannot key-frame static models")
-        self._update_pose(time, pose_num, fps)
+        if self._group_frame_times is not None:
+            if pose_num != self._initial_pose_num:
+                raise Exception("Changing pose of a model whose initial pose is a group frame "
+                                "is unsupported")
+        else:
+            self._update_pose(time, pose_num, fps)
 
     def set_invisible_to_camera(self):
         for sub_obj in self.sub_objs:
             sub_obj.cycles_visibility.camera = False
 
     def done(self, final_time: float, fps: float):
-        if self._group_pose_num is not None:
+        if self._group_frame_times is not None:
             loop_time = 0
             while loop_time < final_time:
-                for pose_num, offset in enumerate([0] + self._times[:-1]):
+                for pose_num, offset in enumerate([0] + self._group_frame_times[:-1]):
                     self._update_pose(loop_time + offset, pose_num, fps)
-                loop_time += self._times[-1]
+                loop_time += self._group_frame_times[-1]
 
         for sub_obj in self.sub_objs:
             for c in sub_obj.data.shape_keys.animation_data.action.fcurves:
@@ -133,20 +136,19 @@ def _create_shape_key(obj, simple_frame, vert_map):
     return shape_key
 
 
-def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=None):
+def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
-    # Validate frames and extract the group pose num (for static models)
-    group_times = None
-    if static_pose_num is None:
+    # If the initial pose is a group frame, just load frames from that group.
+    if am.frames[initial_pose_num].frame_type == mdl.FrameType.GROUP:
+        group_frame = am.frames[initial_pose_num]
+        group_times = list(group_frame.times)
+    else:
+        group_frame = None
+        group_times = None
         for frame in am.frames:
             if frame.frame_type != mdl.FrameType.SINGLE:
                 raise Exception(f"Frame type {frame.frame_type} not supported for non-static models")
-    else:
-        group_frame = am.frames[static_pose_num]
-        group_times = list(group_frame.times)
-        if group_frame.frame_type != mdl.FrameType.GROUP:
-            raise Exception(f"Frame type {group_frame.frame_type} not supported for static models")
 
     # Set up things specific to each tri-set
     sample_as_light_mats: Set[blendmat.BlendMat] = set()
@@ -171,7 +173,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=No
         bpy.context.scene.collection.objects.link(subobj)
 
         # Create shape keys, used for animation.
-        if static_pose_num is None:
+        if group_frame is None:
             shape_keys.append([
                 _create_shape_key(subobj, frame.frame, vert_map) for frame in am.frames
             ])
@@ -224,5 +226,5 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, static_pose_num=No
         _set_uvs(mesh, am, tri_set)
 
     return BlendMdl(am, obj, sub_objs, sample_as_light_mats,
-                    static_pose_num, group_times, shape_keys)
+                    initial_pose_num, group_times, shape_keys)
 
