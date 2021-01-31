@@ -334,6 +334,7 @@ class ObjectManager:
         self._static_objects: List[ManagedObject] = []
         self._sample_as_light_objects: List[SampleAsLightObject] = []
         self._sal_time: float = 0.
+        self._first_update_time: Optional[float] = None
 
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
@@ -595,6 +596,9 @@ class ObjectManager:
         # Set sample_as_light materials.
         self._update_sample_as_light(view_origin, view_angles, blender_frame)
 
+        # Record for updating latest
+        if self._first_update_time is None:
+            self._first_update_time = time
 
     def done(self, final_time: float):
         # Animate static objects
@@ -608,6 +612,11 @@ class ObjectManager:
         for (entity_num, model_num), obj in self._objs.items():
             if entity_num == self._view_entity_num and model_num != 0:
                 obj.set_invisible_to_camera()
+
+        # Set start / end frame
+        if self._first_update_time is not None:
+            bpy.data.scenes['Scene'].frame_start = int(round(self._first_update_time * self._fps))
+        bpy.data.scenes['Scene'].frame_end = int(round(final_time * self._fps))
 
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
