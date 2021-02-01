@@ -579,8 +579,10 @@ class ObjectManager:
                 obj = self._objs[key]
 
             # Update position / rotation / pose
-            obj.add_origin_keyframe(ent.origin, time)
-            obj.add_angles_keyframe(ent.angles, time)
+            prev_ent = prev_entities.get(entity_num)
+            if prev_ent is None or prev_ent.origin != ent.origin or prev_ent.angles != ent.angles:
+                obj.add_origin_keyframe(ent.origin, time)
+                obj.add_angles_keyframe(ent.angles, time)
             obj.add_pose_keyframe(ent.frame, time)
 
         # Unhide objects that were updated this frame, or whose model changed.
