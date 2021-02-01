@@ -201,11 +201,13 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
             if fullbright_array_im is not None:
                 fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
                 strength = mdl_cfg['strength']
+                cam_strength = mdl_cfg.get('cam_strength', strength)
 
                 bm = blendmat.setup_fullbright_material(
                     blendmat.BlendMatImages.from_single_pair(im, fullbright_im),
                     mat_name,
                     strength,
+                    cam_strength,
                     warp=False
                 )
             else:

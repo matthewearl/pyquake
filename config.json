@@ -12,16 +12,19 @@
         "flame": {
             "sample_as_light": true,
             "strength": 10000,
+            "cam_strength": 1,
             "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
         },
         "flame2": {
             "sample_as_light": true,
             "strength": 10000,
+            "cam_strength": 1,
             "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
         },
         "lavaball": {
-            "sample_as_light": false,
-            "strength": 100
+            "sample_as_light": true,
+            "strength": 10000,
+            "cam_strength": 1
         },
         "boss": {
             "sample_as_light": false,

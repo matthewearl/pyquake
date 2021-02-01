@@ -435,7 +435,8 @@ def setup_diffuse_material(ims: BlendMatImages, mat_name: str, warp: bool):
     return BlendMat(mat)
 
 
-def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: float, warp: bool):
+def setup_fullbright_material(ims: BlendMatImages, mat_name: str,
+                              strength: float, cam_strength: float, warp: bool):
     mat, nodes, links = _new_mat(mat_name)
 
     diffuse_im_output, diffuse_time_inputs, diffuse_frame_inputs = _setup_alt_image_nodes(
@@ -452,7 +453,18 @@ def setup_fullbright_material(ims: BlendMatImages, mat_name: str, strength: floa
     add_node = nodes.new('ShaderNodeAddShader')
     emission_node = nodes.new('ShaderNodeEmission')
 
-    emission_node.inputs['Strength'].default_value = strength
+    if strength == cam_strength:
+        emission_node.inputs['Strength'].default_value = strength
+    else:
+        map_range_node = nodes.new('ShaderNodeMapRange')
+        map_range_node.inputs['From Min'].default_value = 0
+        map_range_node.inputs['From Max'].default_value = 1
+        map_range_node.inputs['To Min'].default_value = strength
+        map_range_node.inputs['To Max'].default_value = cam_strength
+        links.new(emission_node.inputs['Strength'], map_range_node.outputs['Result'])
+
+        light_path_node = nodes.new('ShaderNodeLightPath')
+        links.new(map_range_node.inputs['Value'], light_path_node.outputs['Is Camera Ray'])
 
     links.new(diffuse_node.inputs['Color'], diffuse_im_output)
     links.new(emission_node.inputs['Color'], fullbright_im_output)

@@ -149,7 +149,9 @@ class _MaterialApplier:
         elif mat_type == "main":
             if images.any_fullbright and (
                     not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
-                bmat = blendmat.setup_fullbright_material(images, mat_name, tex_cfg['strength'], warp)
+                bmat = blendmat.setup_fullbright_material(images, mat_name,
+                                                          tex_cfg['strength'], tex_cfg['strength'],
+                                                          warp)
             else:
                 bmat = blendmat.setup_diffuse_material(images, mat_name, warp)
         else:
