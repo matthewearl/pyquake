@@ -164,7 +164,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
         if am.frames[0].frame_type == mdl.FrameType.SINGLE:
             initial_verts = am.frames[0].frame.frame_verts
         else:
-            initial_verts = am.frames[0].frames[0].frame_verts
+            initial_verts = am.frames[initial_pose_num].frames[0].frame_verts
         pydata, vert_map = _simplify_pydata([list(v) for v in initial_verts],
                                             [list(am.tris[t]) for t in tri_set])
         mesh.from_pydata(*pydata)
