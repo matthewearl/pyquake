@@ -505,3 +505,39 @@ def setup_transparent_fullbright_material(ims: BlendMatImages, mat_name: str, st
     _create_inputs(frame_inputs, time_inputs, nodes, links)
 
     return BlendMat(mat)
+
+
+def setup_explosion_particle_material(mat_name):
+    mat, nodes, links = _new_mat(mat_name)
+
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+
+    mix_node = nodes.new('ShaderNodeMixShader')
+    links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
+
+    emission_node = nodes.new('ShaderNodeEmission')
+    emission_node.inputs['Strength'].default_value = 10
+    transparent_node = nodes.new('ShaderNodeBsdfTransparent')
+    links.new(mix_node.inputs[1], emission_node.outputs['Emission'])
+    links.new(mix_node.inputs[2], transparent_node.outputs['BSDF'])
+
+    blackbody_node = nodes.new('ShaderNodeBlackbody')
+    links.new(emission_node.inputs['Color'], blackbody_node.outputs['Color'])
+
+    map_range_node = nodes.new('ShaderNodeMapRange')
+    map_range_node.inputs['From Min'].default_value = 0
+    map_range_node.inputs['From Max'].default_value = 1
+    map_range_node.inputs['To Min'].default_value = 4000
+    map_range_node.inputs['To Max'].default_value = 1000
+    links.new(blackbody_node.inputs['Temperature'], map_range_node.outputs['Result'])
+
+    div_node = nodes.new('ShaderNodeMath')
+    div_node.operation = 'DIVIDE'
+    links.new(map_range_node.inputs['Value'], div_node.outputs['Value'])
+    links.new(mix_node.inputs[0], div_node.outputs['Value'])
+
+    particle_info_node = nodes.new('ShaderNodeParticleInfo')
+    links.new(div_node.inputs[0], particle_info_node.outputs['Age'])
+    links.new(div_node.inputs[1], particle_info_node.outputs['Lifetime'])
+
+    return BlendMat(mat)
