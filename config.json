@@ -7,7 +7,11 @@
         },
         "m_g_key": {
             "force_fullbright": true,
-            "strength": 10
+            "strength": 1
+        },
+        "w_s_key": {
+            "force_fullbright": true,
+            "strength": 1
         },
         "flame": {
             "sample_as_light": true,
@@ -23,7 +27,8 @@
         },
         "lavaball": {
             "sample_as_light": true,
-            "strength": 10000,
+            "strength": 1000,
+            "bbox": [[-512, -512, -512], [512, 512, 512]],
             "cam_strength": 1
         },
         "boss": {

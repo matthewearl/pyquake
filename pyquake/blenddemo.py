@@ -444,6 +444,12 @@ class ObjectManager:
                                     initial_pose_num)
             bm.obj.parent = self.world_obj
             managed_obj = AliasModelManagedObject(self._fps, bm)
+
+            if bm.sample_as_light_mats:
+                self._sample_as_light_objects.append(
+                    AliasModelSampleAsLightObject(bm, self._bb, mdl_cfg)
+                )
+
         elif model_path.endswith('.bsp'):
             bsp_name = self._path_to_bsp_name(model_path)
             logger.info('Loading bsp model %s', bsp_name)
