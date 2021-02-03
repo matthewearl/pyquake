@@ -218,6 +218,10 @@ class ManagedObject:
     def _get_blender_frame(self, time):
         return int(round(self.fps * time))
 
+    @property
+    def ignore_duplicate_updates(self) -> bool:
+        raise NotImplementedError
+
     def add_pose_keyframe(self, pose_num: int, time: float):
         raise NotImplementedError
 
@@ -240,6 +244,10 @@ class ManagedObject:
 @dataclass
 class AliasModelManagedObject(ManagedObject):
     bm: blendmdl.BlendMdl
+
+    @property
+    def ignore_duplicate_updates(self) -> bool:
+        return True
 
     def add_pose_keyframe(self, pose_num: int, time: float):
         self.bm.add_pose_keyframe(pose_num, time, self.fps)
@@ -275,6 +283,10 @@ class BspModelManagedObject(ManagedObject):
     _bb: blendbsp.BlendBsp
     _model_num: int
 
+    @property
+    def ignore_duplicate_updates(self) -> bool:
+        return False
+
     def add_pose_keyframe(self, pose_num: int, time: float):
         model = self._bb.bsp.models[self._model_num]
         self._bb.add_material_frame_keyframe(model, pose_num, self._get_blender_frame(time))
@@ -301,6 +313,10 @@ class BspModelManagedObject(ManagedObject):
 
 @dataclass
 class NullManagedObject(ManagedObject):
+    @property
+    def ignore_duplicate_updates(self) -> bool:
+        return False
+
     def add_pose_keyframe(self, pose_num: int, time: float):
         pass
 
@@ -599,7 +615,10 @@ class ObjectManager:
 
             # Update position / rotation / pose
             prev_ent = prev_entities.get(entity_num)
-            if prev_ent is None or prev_ent.origin != ent.origin or prev_ent.angles != ent.angles:
+            if (not obj.ignore_duplicate_updates or
+                    prev_ent is None or
+                    prev_ent.origin != ent.origin or
+                    prev_ent.angles != ent.angles):
                 obj.add_origin_keyframe(ent.origin, time)
                 obj.add_angles_keyframe(ent.angles, time)
             obj.add_pose_keyframe(ent.frame, time)
