@@ -17,12 +17,14 @@
             "sample_as_light": true,
             "strength": 10000,
             "cam_strength": 1,
+            "no_anim": true,
             "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
         },
         "flame2": {
             "sample_as_light": true,
             "strength": 10000,
             "cam_strength": 1,
+            "no_anim": true,
             "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
         },
         "lavaball": {

@@ -43,6 +43,7 @@ class BlendMdl:
     _initial_pose_num: int
     _group_frame_times: Optional[List[float]]
     _shape_keys: List[List[bpy.types.ShapeKey]]
+    _no_anim: bool
     _current_pose_num: Optional[int] = None
     _last_time: Optional[float] = None
 
@@ -64,7 +65,10 @@ class BlendMdl:
             self._last_time = time
 
     def add_pose_keyframe(self, pose_num: int, time: float, fps: float):
-        if self._group_frame_times is not None:
+        if self._no_anim:
+            pass
+
+        elif self._group_frame_times is not None:
             if pose_num != self._initial_pose_num:
                 raise Exception("Changing pose of a model whose initial pose is a group frame "
                                 "is unsupported")
@@ -76,6 +80,9 @@ class BlendMdl:
             sub_obj.cycles_visibility.camera = False
 
     def done(self, final_time: float, fps: float):
+        if self._no_anim:
+            return
+
         if self._group_frame_times is not None:
             loop_time = -random.random() * self._group_frame_times[-1]
             while loop_time < final_time:
@@ -143,7 +150,8 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
     # If the initial pose is a group frame, just load frames from that group.
     if am.frames[initial_pose_num].frame_type == mdl.FrameType.GROUP:
         group_frame = am.frames[initial_pose_num]
-        group_times = list(group_frame.times)
+        timescale = mdl_cfg.get('timescale', 1)
+        group_times = [t / timescale for t in group_frame.times]
     else:
         group_frame = None
         group_times = None
@@ -229,5 +237,6 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
         _set_uvs(mesh, am, tri_set)
 
     return BlendMdl(am, obj, sub_objs, sample_as_light_mats,
-                    initial_pose_num, group_times, shape_keys)
+                    initial_pose_num, group_times, shape_keys,
+                    mdl_cfg.get('no_anim', False))
 
