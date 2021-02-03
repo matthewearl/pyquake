@@ -33,7 +33,7 @@ import bpy
 import bpy_types
 import numpy as np
 
-from . import proto, bsp, mdl, blendmdl, blendbsp, simplex
+from . import proto, bsp, mdl, blendmdl, blendbsp, simplex, blendpart
 
 
 logger = logging.getLogger(__name__)
@@ -336,9 +336,12 @@ class ObjectManager:
         self._sal_time: float = 0.
         self._first_update_time: Optional[float] = None
         self._intermission = False
+        self._num_explosions: int = 0
 
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
+
+        blendpart.get_particle_root().parent = self.world_obj
 
         self._width, self._height = width, height
         bpy.data.scenes['Scene'].render.resolution_x = width
@@ -420,6 +423,10 @@ class ObjectManager:
                 AliasModelSampleAsLightObject(bm, self._bb, mdl_cfg)
             )
 
+    def create_explosion(self, pos, time):
+        obj_name = f'explosion{self._num_explosions}'
+        blendpart.create_explosion(time, obj_name, pos, self._fps)
+        self._num_explosions += 1
 
     def _create_managed_object(self, entity_num, model_num, skin_num, initial_pose_num):
         model_path = self._model_paths[model_num - 1] if model_num != 0 else None
@@ -697,6 +704,10 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 prev_info = entities.get(parsed.entity_num, baseline)
                 entities[parsed.entity_num] = prev_info.update(parsed, baseline)
                 updated.add(parsed.entity_num)
+
+            if parsed.msg_type == proto.ServerMessageType.TEMP_ENTITY:
+                if parsed.temp_entity_type == proto.TempEntityTypes.EXPLOSION:
+                    obj_mgr.create_explosion(parsed.origin, time)
 
             if parsed.msg_type in (
                     proto.ServerMessageType.INTERMISSION,

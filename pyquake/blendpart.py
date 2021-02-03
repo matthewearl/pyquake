@@ -29,6 +29,7 @@ import functools
 
 import bpy
 import bmesh
+import numpy as np
 
 from . import blendmat
 
@@ -46,16 +47,52 @@ def _create_icosphere(diameter, obj_name):
     return obj
 
 
+def _create_cuboid(mins, maxs, obj_name):
+    mesh = bpy.data.meshes.new(obj_name)
+    obj = bpy.data.objects.new(obj_name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+
+    mins = np.array(mins)
+    maxs = np.array(maxs)
+    size = maxs - mins
+    centre = 0.5 * (maxs + mins)
+
+    bm = bmesh.new()
+    d = bmesh.ops.create_cube(bm, size=1)
+    verts = d['verts']
+    bmesh.ops.scale(bm, vec=size, verts=verts)
+    bmesh.ops.translate(bm, vec=centre, verts=verts)
+    bm.to_mesh(mesh)
+    bm.free()
+
+    return obj
+
+
 @functools.lru_cache(None)
 def get_particle_root():
-    return bpy.data.objects.new('particle_root', None)
+    obj = bpy.data.objects.new('particle_root', None)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
 
 
 @functools.lru_cache(None)
 def _get_explosion_particle_object():
-    obj = _create_icosphere(2, 'explosion_particle')
+    obj = _create_icosphere(1, 'explosion_particle')
     obj.parent = get_particle_root()
     obj.data.materials.append(blendmat.setup_explosion_particle_material('explosion').mat)
+
+    obj.hide_render = True
+
+    return obj
+
+
+@functools.lru_cache(None)
+def _get_teleport_particle_object():
+    obj = _create_icosphere(1, 'teleport_particle')
+    obj.parent = get_particle_root()
+    obj.data.materials.append(blendmat.setup_teleport_particle_material('teleport').mat)
+
+    obj.hide_render = True
 
     return obj
 
@@ -70,15 +107,47 @@ def create_explosion(start_time, obj_name, pos, fps):
 
     part.frame_start = int(round(start_time * fps))
     part.frame_end = int(round((start_time + 0.1) * fps))
-    part.lifetime = int(round(fps * 0.2))
+    part.lifetime = int(round(fps))
     part.lifetime_random = 0.9
+    part.normal_factor = 0
     part.factor_random = 0.5
     part.render_type = 'OBJECT'
     part.instance_object = _get_explosion_particle_object()
     part.particle_size = 1
+    part.size_random = 0.9
     part.effector_weights.gravity = 0.01
 
     emitter.show_instancer_for_render = False
+    emitter.parent = get_particle_root()
+    emitter.location = pos
+
+    return emitter
+
+def create_teleport(start_time, obj_name, pos, fps):
+    emitter = _create_cuboid((-16, -16, -24), (16, 16, 32), obj_name)
+    emitter.parent = get_particle_root()
+
+    emitter.modifiers.new("teleport_particle_system", type='PARTICLE_SYSTEM')
+
+    assert len(emitter.particle_systems) == 1
+    part = emitter.particle_systems[0].settings
+
+    part.frame_start = int(round(start_time * fps))
+    part.frame_end = int(round((start_time + 0.1) * fps))
+    part.lifetime = int(round(fps * 0.5))
+    part.lifetime_random = 0.5
+    part.emit_from = 'VOLUME'
+    part.normal_factor = 0.02
+    part.factor_random = 0.02
+    part.render_type = 'OBJECT'
+    part.instance_object = _get_teleport_particle_object()
+    part.particle_size = 1
+    part.size_random = 0.9
+    part.effector_weights.gravity = 0.00
+
+    emitter.show_instancer_for_render = False
+    emitter.parent = get_particle_root()
+    emitter.location = pos
 
     return emitter
 
