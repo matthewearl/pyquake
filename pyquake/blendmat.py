@@ -552,7 +552,7 @@ def setup_teleport_particle_material(mat_name):
     links.new(output_node.inputs['Surface'], mix_node.outputs['Shader'])
 
     emission_node = nodes.new('ShaderNodeEmission')
-    emission_node.inputs['Strength'].default_value = 1
+    emission_node.inputs['Strength'].default_value = .5
     transparent_node = nodes.new('ShaderNodeBsdfTransparent')
     links.new(mix_node.inputs[1], emission_node.outputs['Emission'])
     links.new(mix_node.inputs[2], transparent_node.outputs['BSDF'])

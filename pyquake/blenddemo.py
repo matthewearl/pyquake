@@ -337,6 +337,7 @@ class ObjectManager:
         self._first_update_time: Optional[float] = None
         self._intermission = False
         self._num_explosions: int = 0
+        self._num_teleports: int = 0
 
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
@@ -422,6 +423,11 @@ class ObjectManager:
             self._sample_as_light_objects.append(
                 AliasModelSampleAsLightObject(bm, self._bb, mdl_cfg)
             )
+
+    def create_teleport(self, pos, time):
+        obj_name = f'teleport{self._num_teleports}'
+        blendpart.create_teleport(time, obj_name, pos, self._fps)
+        self._num_teleports += 1
 
     def create_explosion(self, pos, time):
         obj_name = f'explosion{self._num_explosions}'
@@ -708,6 +714,8 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
             if parsed.msg_type == proto.ServerMessageType.TEMP_ENTITY:
                 if parsed.temp_entity_type == proto.TempEntityTypes.EXPLOSION:
                     obj_mgr.create_explosion(parsed.origin, time)
+                elif parsed.temp_entity_type == proto.TempEntityTypes.TELEPORT:
+                    obj_mgr.create_teleport(parsed.origin, time)
 
             if parsed.msg_type in (
                     proto.ServerMessageType.INTERMISSION,
