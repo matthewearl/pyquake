@@ -115,6 +115,44 @@
                 }
             }
         },
+        "start": {
+            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "tlight07": {
+                    "strength": 1000,
+                    "sample_as_light": true,
+                    "tint": [1, 1, 3.33, 1],
+                    "bbox": [[-768, -768, -768], [768, 768, 768]]
+                },
+                "sliplite": {
+                    "strength": 100,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                },
+                "slipside": {
+                    "strength": 100,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                }
+            }
+        },
         "e1m1": {
             "do_materials": true,
             "fullbright_object_overlay": true,
