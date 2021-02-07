@@ -595,11 +595,14 @@ class ObjectManager:
 
         # Hide any objects that weren't updated in this frame, or whose model changed.
         for entity_num in prev_updated:
+            obj = self._objs[entity_num, prev_entities[entity_num].model_num]
             if (prev_entities[entity_num].model_num != entities[entity_num].model_num
                     or entity_num not in updated):
-                self._objs[entity_num, prev_entities[entity_num].model_num].add_visible_keyframe(
-                    False, time
-                )
+                obj.add_visible_keyframe(False, time)
+
+                # Insert keyframes so the object doesn't drift towards where the entity is re-used.
+                obj.add_origin_keyframe(prev_entities[entity_num].origin, time)
+                obj.add_angles_keyframe(prev_entities[entity_num].angles, time)
 
         for entity_num in updated:
             # Create managed objects where we don't already have one for the given entity num / model num.
