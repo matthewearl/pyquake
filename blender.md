@@ -1,7 +1,7 @@
 # Demo to blender scene converter
 
 This repo contains utilities for converting Quake demo files (.dem) into blender
-scenes.  Tested with Blender 2.90.1
+scenes.  Tested with Blender 2.90.1.
 
 ## Setup
 
@@ -79,19 +79,18 @@ should appear.
 The above produces a root `demo` empty, under which the various other entities
 appear.
 
+It's recommended to save the .blend file just before executing so you can
+quickly revert and re-run the script if necessary.
+
 
 ## Activating the demo camera
 
 Click on the camera icon next to the demo_cam object in the outliner to make the
-current camera the first person view.  You'll be able to see parts of the player
-model from this point of view, so you'll likely want to make them invisible to
-camera rays.  To do this, select each of the objects under the `ent1_player`
-empty, and disable camera ray visibility under the Visibility settings on the
-Object Properties tab.
+current camera the first person view.
 
 You can use other cameras, however this may introduce extra noise since
 emitters' sample_as_light (aka Multiple Importance Sampling) property is
-keyframed according to the player's position, to avoid sampling distant lights.
+keyframed according to the player's position, to avoid sampling occluded lights.
 
 
 ## Setting the correct framerate
@@ -119,6 +118,8 @@ changed:
 - `models.<name>.bbox`: A pair of (mins, maxs) 3-tuples describing the range of
   influence of the light emitted by this object.  Required if `sample_as_light`
   is true.
+- `models.<name>.no_naim`: Don't animate the model.  Currently used for flame
+  models since the movement introduces temporal inconsistency in the noise.
 - `maps.<name>.fullbright_object_overlay`: Separate out fullbright regions of
   textures with the `overlay` flag set into their own objects.  This is to make
   multiple importance sampling more efficient, since a large object with a small
@@ -139,7 +140,8 @@ changed:
 
 The `sample_as_light` flag for model and (static) object materials is set to
 False whenever the demo_cam is out of range of the light, according to the map's
-PVS data.  This is to avoid wasting samples on occluded lights.
+PVS data, and the view frustum.  This is to avoid wasting samples on occluded
+lights.
 
 
 ## Adding lights from .map files
@@ -179,4 +181,26 @@ this, select the lights you wish to keep and take a note of their object names.
 Finally, copy the lights from the lights JSON file into the relevant section of
 the global `config.json` file.  You may need to tweak the brightness to achieve
 the original effect.  Beware that adding too many lights can introduce noise.
+
+
+## Extracting pak files
+
+Marathon runs are typically archived inside `.pak` files.  Since `add_demo`
+requires a demo file, you'll need a way to extract the `.pak`:
+
+```
+$ pyq_pak_extract -h
+usage: pyq_pak_extract [-h] [-l] [-x] pak-file-name [target-dir]
+
+Extract / list pak archives
+
+positional arguments:
+  pak-file-name
+  target-dir
+
+optional arguments:
+  -h, --help     show this help message and exit
+  -l, --list     list archive contents
+  -x, --extract  extract archive contents
+```
 
