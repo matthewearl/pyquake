@@ -1,4 +1,6 @@
 {
+    "do_materials": true,
+    "use_lightmap": true,
     "models": {
         "__default__": {
             "sample_as_light": false,
@@ -40,7 +42,6 @@
     },
     "maps": {
         "__bsp_model__": {
-            "do_materials": true,
             "fullbright_object_overlay": false,
             "textures": {
                 "__default__": {
@@ -52,7 +53,6 @@
             }
         },
         "100m": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -118,7 +118,6 @@
             }
         },
         "start": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -156,7 +155,6 @@
             }
         },
         "e1m1": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -230,7 +228,6 @@
             }
         },
         "e1m2": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -282,7 +279,6 @@
             }
         },
         "e1m3": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -324,7 +320,6 @@
             }
         },
         "e1m4": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -356,7 +351,6 @@
             }
         },
         "e1m5": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -399,7 +393,6 @@
             }
         },
         "e1m6": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -466,7 +459,6 @@
             }
         },
         "e1m7": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -513,7 +505,6 @@
             }
         },
         "e2m1": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {

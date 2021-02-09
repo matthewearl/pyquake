@@ -214,7 +214,7 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
         if im is not None:
             texture_node = nodes.new('ShaderNodeTexImage')
             texture_node.image = im
-            texture_node.interpolation = 'Closest'
+            texture_node.interpolation = 'Linear'
             texture_nodes.append(texture_node)
         else:
             texture_nodes.append(None)
@@ -567,5 +567,34 @@ def setup_teleport_particle_material(mat_name):
     links.new(div_node.inputs[0], particle_info_node.outputs['Age'])
     links.new(div_node.inputs[1], particle_info_node.outputs['Lifetime'])
     links.new(color_ramp_node.inputs['Fac'], particle_info_node.outputs['Random'])
+
+    return BlendMat(mat)
+
+
+def setup_lightmap_material(mat_name: str, ims: BlendMatImages, lightmap_im: bpy.types.Image,
+                            lightmap_uv_layer_name: str, warp: bool):
+    mat, nodes, links = _new_mat(mat_name)
+
+    im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, warp=warp, fullbright=False)
+    output_node = nodes.new('ShaderNodeOutputMaterial')
+
+    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
+    links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
+
+    mul_node = nodes.new('ShaderNodeVectorMath')
+    mul_node.operation = 'MULTIPLY'
+    links.new(diffuse_node.inputs['Color'], mul_node.outputs['Vector'])
+
+    lightmap_texture_node = nodes.new('ShaderNodeTexImage')
+    lightmap_texture_node.image = lightmap_im
+    lightmap_texture_node.interpolation = 'Closest'
+    links.new(mul_node.inputs[0], im_output)
+    links.new(mul_node.inputs[1], lightmap_texture_node.outputs['Color'])
+
+    uv_node = nodes.new('ShaderNodeUVMap')
+    uv_node.uv_map = lightmap_uv_layer_name
+    links.new(lightmap_texture_node.inputs['Vector'], uv_node.outputs['UV'])
+
+    _create_inputs(frame_inputs, time_inputs, nodes, links)
 
     return BlendMat(mat)

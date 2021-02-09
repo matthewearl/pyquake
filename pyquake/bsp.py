@@ -35,6 +35,7 @@ from typing import NamedTuple, Tuple, List, Iterable
 
 import numpy as np
 
+from . import boxpack
 from . import ent
 from . import simplex
 
@@ -217,6 +218,10 @@ class Face(NamedTuple):
         return [self.tex_info.vert_to_tex_coords(v) for v in self.vertices]
 
     @property
+    def full_lightmap_tex_coords(self):
+        return self.bsp._full_lightmap_tex_coords[self]
+
+    @property
     def tex_info(self):
         return self.bsp.texinfo[self.texinfo_id]
 
@@ -269,6 +274,28 @@ class Face(NamedTuple):
     def leaf(self):
         return self.bsp._face_to_leaf[self]
 
+    @property
+    def has_lightmap(self):
+        return self.lightmap_offset != -1
+
+    def _extract_local_lightmap(self):
+        tex_coords = np.array(list(self.tex_coords))
+
+        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+
+        size = (maxs - mins) + 1
+
+        lightmap = np.array(list(
+            self.bsp.lightmap[self.lightmap_offset:
+                              self.lightmap_offset + size[0] * size[1]]
+        )).reshape((size[1], size[0]))
+
+        tex_coords -= mins * 16
+        tex_coords += 8
+        tex_coords /= 16.
+
+        return lightmap, tex_coords
 
 class TexInfo(NamedTuple):
     bsp: "Bsp"
@@ -398,6 +425,35 @@ class Bsp:
     @functools.lru_cache(None)
     def textures_by_name(self):
         return {t.name: t for t in self.textures.values()}
+
+    @functools.lru_cache(1)
+    def _make_full_lightmap(self, lightmap_size=(512, 512)):
+        lightmaps = {face: face._extract_local_lightmap() for face in self.faces if face.has_lightmap}
+        lightmaps = dict(reversed(sorted(lightmaps.items(), key=lambda x: x[1][0].shape[0] * x[1][0].shape[1])))
+
+        box_packer = boxpack.BoxPacker(lightmap_size)
+        for face, (lightmap, tex_coords) in lightmaps.items():
+            if not box_packer.insert(face, (lightmap.shape[1], lightmap.shape[0])):
+                raise Exception("Could not pack lightmaps into {} image".format(lightmap_size))
+
+        lightmap_image = np.zeros((lightmap_size[1], lightmap_size[0]), dtype=np.uint8)
+        tex_coords = {}
+        for face, (x, y) in box_packer:
+            lm, tc = lightmaps[face]
+            lightmap_image[y:y + lm.shape[0], x:x + lm.shape[1]] = lm
+            tex_coords[face] = (tc + (x, y)) / lightmap_size
+
+        return lightmap_image, tex_coords
+
+    @property
+    def full_lightmap_image(self):
+        lightmap_image, tex_coords = self._make_full_lightmap()
+        return lightmap_image
+
+    @property
+    def _full_lightmap_tex_coords(self):
+        lightmap_image, tex_coords = self._make_full_lightmap()
+        return tex_coords
 
     def _read(self, f, n):
         b = f.read(n)

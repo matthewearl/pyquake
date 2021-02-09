@@ -76,6 +76,7 @@ def extract_lightmap_texture(bsp, face_idx):
     return lightmap, tex_coords
 
 
+# TODO: Replace this with Bsp.full_lightmap_image and Face.full_lightmap_tex_coords
 def make_full_lightmap(bsp, lightmap_size=(512, 512)):
     logger.info("Making lightmap")
     lightmaps = {face_idx: extract_lightmap_texture(bsp, face_idx)
