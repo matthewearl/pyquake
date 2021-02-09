@@ -578,12 +578,9 @@ def setup_lightmap_material(mat_name: str, ims: BlendMatImages, lightmap_im: bpy
     im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, warp=warp, fullbright=False)
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
-    diffuse_node = nodes.new('ShaderNodeBsdfDiffuse')
-    links.new(output_node.inputs['Surface'], diffuse_node.outputs['BSDF'])
-
     mul_node = nodes.new('ShaderNodeVectorMath')
     mul_node.operation = 'MULTIPLY'
-    links.new(diffuse_node.inputs['Color'], mul_node.outputs['Vector'])
+    links.new(output_node.inputs['Surface'], mul_node.outputs['Vector'])
 
     lightmap_texture_node = nodes.new('ShaderNodeTexImage')
     lightmap_texture_node.image = lightmap_im
