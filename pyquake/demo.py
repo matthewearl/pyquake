@@ -76,7 +76,7 @@ class ViewGen:
         entity_num_to_model_num = {}
         serverinfo_rcvd = False
         self.complete = False
-        for view_angle, msg in proto.read_demo_file(self._demo_file):
+        for msg_end, view_angle, msg in proto.read_demo_file(self._demo_file):
             if msg.msg_type == proto.ServerMessageType.SERVERINFO:
                 if serverinfo_rcvd:
                     break
