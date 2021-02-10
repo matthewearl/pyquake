@@ -22,20 +22,24 @@
 __all__ = (
     'array_ims_from_indices',
     'im_from_array',
-    'new_mat',
-    'setup_sky_material',
     'setup_diffuse_material',
-    'setup_fullbright_material',
-    'setup_transparent_fullbright_material',
-    'setup_lightmap_material',
     'setup_flat_material',
+    'setup_fullbright_material',
+    'setup_lightmap_material',
+    'setup_light_style_node_groups',
+    'setup_sky_material',
+    'setup_transparent_fullbright_material',
 )
 
+
 from dataclasses import dataclass
-from typing import List, Iterable, Optional, Tuple
+from typing import List, Iterable, Optional, Tuple, Dict
 
 import bpy
 import numpy as np
+
+
+_MAX_LIGHT_STYLES = 64
 
 
 def im_from_array(name, array_im):
@@ -62,6 +66,21 @@ def array_ims_from_indices(pal, im_indices, gamma=1.0, light_tint=(1, 1, 1, 1), 
         fullbright_array_im = None
 
     return array_im, fullbright_array_im, fullbright_array
+
+
+def setup_light_style_node_groups():
+    groups = {}
+    for style_idx in range(_MAX_LIGHT_STYLES):
+        group = bpy.data.node_groups.new(f'style_{style_idx}', 'ShaderNodeTree')
+        group.outputs.new('NodeSocketFloat', 'Value')
+        input_node = group.nodes.new('NodeGroupInput')
+        output_node = group.nodes.new('NodeGroupOutput')
+        value_node = group.nodes.new('ShaderNodeValue')
+        group.links.new(output_node.inputs['Value'], value_node.outputs['Value'])
+
+        groups[style_idx] = group
+
+    return groups
 
 
 def _new_mat(name):
@@ -280,6 +299,20 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
         raise ValueError('No images passed')
 
     return time_inputs, uv_inputs, colour_output
+
+
+def _reduce(node_type: str, operation: str, it: Iterable[bpy.types.NodeSocket], nodes, links):
+    iter_ = iter(it)
+    accum = next(iter_)
+
+    for ns in iter_:
+        op_node = nodes.new(node_type)
+        op_node.operation = operation
+        links.new(op_node.inputs[0], accum)
+        links.new(op_node.inputs[1], ns)
+        accum = op_node.outputs[0]
+
+    return accum
 
 
 def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, warp: bool, fullbright: bool) -> \
@@ -573,27 +606,42 @@ def setup_teleport_particle_material(mat_name):
     return BlendMat(mat)
 
 
-def setup_lightmap_material(mat_name: str, ims: BlendMatImages, lightmap_im: bpy.types.Image,
-                            lightmap_uv_layer_name: str, warp: bool):
+def setup_lightmap_material(mat_name: str, ims: BlendMatImages,
+                            lightmap_ims: List[bpy.types.Image], lightmap_uv_layer_name: str,
+                            warp: bool,
+                            lightmap_styles: Tuple[int],
+                            style_node_groups: Dict[int, bpy.types.ShaderNodeTree]):
     mat, nodes, links = _new_mat(mat_name)
 
     im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, warp=warp, fullbright=False)
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
-    mul_node = nodes.new('ShaderNodeVectorMath')
-    mul_node.operation = 'MULTIPLY'
-    links.new(output_node.inputs['Surface'], mul_node.outputs['Vector'])
-
-    lightmap_texture_node = nodes.new('ShaderNodeTexImage')
-    lightmap_texture_node.image = lightmap_im
-    lightmap_texture_node.interpolation = 'Linear'
-    links.new(mul_node.inputs[0], im_output)
-    #mul_node.inputs[0].default_value = (1, 1, 1)
-    links.new(mul_node.inputs[1], lightmap_texture_node.outputs['Color'])
+    color_mul_node = nodes.new('ShaderNodeVectorMath')
+    color_mul_node.operation = 'MULTIPLY'
+    links.new(output_node.inputs['Surface'], color_mul_node.outputs['Vector'])
+    links.new(color_mul_node.inputs[0], im_output)
 
     uv_node = nodes.new('ShaderNodeUVMap')
     uv_node.uv_map = lightmap_uv_layer_name
-    links.new(lightmap_texture_node.inputs['Vector'], uv_node.outputs['UV'])
+
+    lightmap_outputs = []
+    for lightmap_idx in (idx for idx in range(4) if lightmap_styles[idx] != 255):
+        lightmap_mul_node = nodes.new('ShaderNodeVectorMath')
+        lightmap_mul_node.operation = 'MULTIPLY'
+        lightmap_outputs.append(lightmap_mul_node.outputs[0])
+
+        lightmap_texture_node = nodes.new('ShaderNodeTexImage')
+        lightmap_texture_node.image = lightmap_ims[lightmap_idx]
+        lightmap_texture_node.interpolation = 'Linear'
+        group_node = nodes.new('ShaderNodeGroup')
+        group_node.node_tree = style_node_groups[lightmap_styles[lightmap_idx]]
+        links.new(lightmap_mul_node.inputs[0], lightmap_texture_node.outputs['Color'])
+        links.new(lightmap_mul_node.inputs[1], group_node.outputs['Value'])
+
+        links.new(lightmap_texture_node.inputs['Vector'], uv_node.outputs['UV'])
+
+    links.new(color_mul_node.inputs[1],
+              _reduce('ShaderNodeVectorMath', 'ADD', lightmap_outputs, nodes, links))
 
     _create_inputs(frame_inputs, time_inputs, nodes, links)
 

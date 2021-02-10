@@ -82,18 +82,21 @@ def _set_lightmap_uvs(mesh, faces):
     bm.to_mesh(mesh)
 
 
-def _load_lightmap_im(lightmap_array):
+def _load_lightmap_im(lightmap_array, lightmap_idx):
     lightmap_array = (lightmap_array / 255)
     lightmap_rgba = np.empty(lightmap_array.shape + (4,), dtype=np.float)
     lightmap_rgba[:, :, :3] = lightmap_array[:, :, None]
     lightmap_rgba[:, :, 3] = 1.0
-    return blendmat.im_from_array('lightmap', lightmap_rgba)
+    return blendmat.im_from_array(f'lightmap_{lightmap_idx}', lightmap_rgba)
 
 
-def _get_mat_name(texture, leaf, model, use_lightmap, has_lightmap, mat_type):
+def _get_mat_name(texture, leaf, model, use_lightmap, lightmap_styles, mat_type):
     if use_lightmap:
         assert mat_type == "main"
-        suffix = "shaded" if has_lightmap else "flat"
+        if lightmap_styles is None:
+            suffix = "flat"
+        else:
+            suffix = "shaded_" + '_'.join(str(s) for s in lightmap_styles)
         mat_name = f"{texture.name}_{suffix}"
     else:
         leaf_str = "" if leaf is None else f"leaf_{leaf.id_}_"
@@ -136,18 +139,23 @@ def _get_anim_textures(texture: Texture, texture_dict: Dict[str, Texture]) -> bl
 
 
 class _MaterialApplier:
-    def __init__(self, pal, texture_dict, map_cfg, lightmap_im: Optional[bpy.types.Image]):
+    def __init__(self, pal, texture_dict, map_cfg, lightmap_ims: Optional[List[bpy.types.Image]]):
         self._pal = pal
         self._map_cfg = map_cfg
         self.sample_as_light_info = collections.defaultdict(lambda: collections.defaultdict(dict))
         self._all_textures: Dict[str, Texture] = texture_dict
         self.posable_mats: Dict[Model, Set[blendmat.BlendMat]] = collections.defaultdict(set)
         self.animated_mats: Set[blendmat.BlendMat] = set()
-        self._lightmap_im = lightmap_im
+        self._lightmap_ims = lightmap_ims
+
+        if self._lightmap_ims is not None:
+            self._style_node_groups = blendmat.setup_light_style_node_groups()
+        else:
+            self._style_node_groups = None
 
     @property
     def _use_lightmap(self):
-        return self._lightmap_im is not None
+        return self._lightmap_ims is not None
 
     def _load_image(self, texture):
         tex_cfg = _get_texture_config(texture, self._map_cfg)
@@ -181,7 +189,7 @@ class _MaterialApplier:
         return True
 
     @functools.lru_cache(None)
-    def _get_material(self, mat_name, mat_type, texture, images, warp, sky, has_lightmap):
+    def _get_material(self, mat_name, mat_type, texture, images, warp, sky, lightmap_styles):
         if not self._map_cfg['fullbright_object_overlay']:
             assert mat_type == "main"
 
@@ -193,13 +201,15 @@ class _MaterialApplier:
             bmat = blendmat.setup_sky_material(images, mat_name)
         elif mat_type == "main":
             if self._use_lightmap:
-                if has_lightmap:
+                if lightmap_styles is not None:
                     bmat = blendmat.setup_lightmap_material(
                         mat_name,
                         images,
-                        self._lightmap_im,
+                        self._lightmap_ims,
                         _LIGHTMAP_UV_LAYER_NAME,
-                        warp
+                        warp,
+                        lightmap_styles,
+                        self._style_node_groups
                     )
                 else:
                     bmat = blendmat.setup_flat_material(mat_name, images, warp)
@@ -227,16 +237,17 @@ class _MaterialApplier:
             sample_as_light = self._get_sample_as_light(texture, images, mat_type)
             warp = texture.name.startswith('*')
             sky = texture.name.startswith('sky')
+            lightmap_styles = bsp_face.styles if bsp_face.has_any_lightmap else None
 
             mat_name = _get_mat_name(texture,
                                      bsp_face.leaf if sample_as_light else None,
                                      model if images.is_posable else None,
                                      self._use_lightmap,
-                                     bsp_face.has_any_lightmap,
+                                     lightmap_styles,
                                      mat_type)
 
             bmat = self._get_material(mat_name, mat_type, texture, images, warp, sky,
-                                      bsp_face.has_any_lightmap)
+                                      None if lightmap_styles is None else tuple(lightmap_styles))
 
             if sample_as_light:
                 self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
@@ -520,12 +531,11 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     else:
         map_cfg = config['maps'][map_name]
 
+    lightmap_ims = None
     if config['do_materials']:
         if config['use_lightmap']:
-            lightmap_im = _load_lightmap_im(bsp.full_lightmap_image)
-        else:
-            lightmap_im = None
-        mat_applier = _MaterialApplier(pal, bsp.textures_by_name, map_cfg, lightmap_im)
+            lightmap_ims = [_load_lightmap_im(a, idx) for idx, a in enumerate(bsp.full_lightmap_image)]
+        mat_applier = _MaterialApplier(pal, bsp.textures_by_name, map_cfg, lightmap_ims)
     else:
         mat_applier = None
 
@@ -536,11 +546,11 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
     model_objs = {}
     for model_id, model in enumerate(bsp.models):
         model_obj = _load_object(model_id, model, map_name, mat_applier, obj_name_prefix,
-                                 lightmap_im is not None)
+                                 lightmap_ims is not None)
         model_obj.parent = map_obj
         model_objs[model] = model_obj
 
-        if lightmap_im is None and map_cfg['fullbright_object_overlay']:
+        if lightmap_ims is None and map_cfg['fullbright_object_overlay']:
             model_fullbright_objects = _load_fullbright_objects(
                 model, map_name, pal, bsp.textures_by_name, mat_applier, map_cfg, obj_name_prefix
             )
