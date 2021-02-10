@@ -41,7 +41,7 @@ _LIGHTMAP_UV_LAYER_NAME = "lightmap_uvmap"
 
 def _texture_to_arrays(pal, texture, light_tint=(1, 1, 1, 1)):
     im_indices = np.fromstring(texture.data[0], dtype=np.uint8).reshape((texture.height, texture.width))
-    return blendmat.array_ims_from_indices(pal, im_indices, light_tint=light_tint, gamma=0.8)
+    return blendmat.array_ims_from_indices(pal, im_indices, light_tint=light_tint, gamma=1.0)
 
 
 def _set_uvs(mesh, faces):
@@ -83,17 +83,24 @@ def _set_lightmap_uvs(mesh, faces):
 
 
 def _load_lightmap_im(lightmap_array):
-    lightmap_array = (lightmap_array / 255) ** 0.5
+    lightmap_array = (lightmap_array / 255)
     lightmap_rgba = np.empty(lightmap_array.shape + (4,), dtype=np.float)
     lightmap_rgba[:, :, :3] = lightmap_array[:, :, None]
     lightmap_rgba[:, :, 3] = 1.0
     return blendmat.im_from_array('lightmap', lightmap_rgba)
 
 
-def _get_mat_name(texture, leaf, model, mat_type):
-    leaf_str = "" if leaf is None else f"leaf_{leaf.id_}_"
-    model_str = "" if model is None else f"model_{model.id_}_"
-    return f"{texture.name}_{leaf_str}{model_str}{mat_type}"
+def _get_mat_name(texture, leaf, model, use_lightmap, has_lightmap, mat_type):
+    if use_lightmap:
+        assert mat_type == "main"
+        suffix = "shaded" if has_lightmap else "flat"
+        mat_name = f"{texture.name}_{suffix}"
+    else:
+        leaf_str = "" if leaf is None else f"leaf_{leaf.id_}_"
+        model_str = "" if model is None else f"model_{model.id_}_"
+        mat_name = f"{texture.name}_{leaf_str}{model_str}{mat_type}"
+
+    return mat_name
 
 
 def _get_texture_config(texture, map_cfg):
@@ -174,7 +181,7 @@ class _MaterialApplier:
         return True
 
     @functools.lru_cache(None)
-    def _get_material(self, mat_name, mat_type, texture, images, warp, sky):
+    def _get_material(self, mat_name, mat_type, texture, images, warp, sky, has_lightmap):
         if not self._map_cfg['fullbright_object_overlay']:
             assert mat_type == "main"
 
@@ -186,13 +193,16 @@ class _MaterialApplier:
             bmat = blendmat.setup_sky_material(images, mat_name)
         elif mat_type == "main":
             if self._use_lightmap:
-                bmat = blendmat.setup_lightmap_material(
-                    mat_name,
-                    images,
-                    self._lightmap_im,
-                    _LIGHTMAP_UV_LAYER_NAME,
-                    warp
-                )
+                if has_lightmap:
+                    bmat = blendmat.setup_lightmap_material(
+                        mat_name,
+                        images,
+                        self._lightmap_im,
+                        _LIGHTMAP_UV_LAYER_NAME,
+                        warp
+                    )
+                else:
+                    bmat = blendmat.setup_flat_material(mat_name, images, warp)
             elif images.any_fullbright and (
                     not self._map_cfg['fullbright_object_overlay'] or not tex_cfg['overlay']):
                 bmat = blendmat.setup_fullbright_material(images, mat_name,
@@ -221,9 +231,12 @@ class _MaterialApplier:
             mat_name = _get_mat_name(texture,
                                      bsp_face.leaf if sample_as_light else None,
                                      model if images.is_posable else None,
+                                     self._use_lightmap,
+                                     bsp_face.has_lightmap,
                                      mat_type)
 
-            bmat = self._get_material(mat_name, mat_type, texture, images, warp, sky)
+            bmat = self._get_material(mat_name, mat_type, texture, images, warp, sky,
+                                      bsp_face.has_lightmap)
 
             if sample_as_light:
                 self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
