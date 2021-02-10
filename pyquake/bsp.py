@@ -198,6 +198,7 @@ class Face(NamedTuple):
     edge_list_idx: int
     num_edges: int
     texinfo_id: int
+    styles: List[int]
     lightmap_offset: int
 
     @property
@@ -275,27 +276,59 @@ class Face(NamedTuple):
         return self.bsp._face_to_leaf[self]
 
     @property
-    def has_lightmap(self):
+    def has_any_lightmap(self):
         return self.lightmap_offset != -1
 
-    def _extract_local_lightmap(self):
+    def has_lightmap(self, lightmap_idx):
+        return self.has_any_lightmap and self.styles[lightmap_idx] != 255
+
+    @property
+    def _local_lightmap_shape(self):
         tex_coords = np.array(list(self.tex_coords))
 
         mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
         maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
 
         size = (maxs - mins) + 1
+        return (size[1], size[0])
 
-        lightmap = np.array(list(
-            self.bsp.lightmap[self.lightmap_offset:
-                              self.lightmap_offset + size[0] * size[1]]
-        )).reshape((size[1], size[0]))
+    @property
+    def _local_lightmap_tcs(self):
+        tex_coords = np.array(list(self.tex_coords))
+
+        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
 
         tex_coords -= mins * 16
         tex_coords += 8
         tex_coords /= 16.
 
-        return lightmap, tex_coords
+        return tex_coords
+
+    def _extract_local_lightmap(self, lightmap_idx):
+        assert self.has_lightmap(lightmap_idx)
+
+        shape = self._local_lightmap_shape
+        size = shape[0] * shape[1]
+
+        idx = 0
+        for i in range(lightmap_idx):
+            if self.has_lightmap(i):
+                idx += 1
+
+        lightmap = np.array(list(
+            self.bsp.lightmap[self.lightmap_offset + size * idx:
+                              self.lightmap_offset + size * (idx + 1)]
+        )).reshape(shape)
+
+        return lightmap
+
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+
 
 class TexInfo(NamedTuple):
     bsp: "Bsp"
@@ -428,20 +461,23 @@ class Bsp:
 
     @functools.lru_cache(1)
     def _make_full_lightmap(self, lightmap_size=(512, 512)):
-        lightmaps = {face: face._extract_local_lightmap() for face in self.faces if face.has_lightmap}
-        lightmaps = dict(reversed(sorted(lightmaps.items(), key=lambda x: x[1][0].shape[0] * x[1][0].shape[1])))
+        lightmap_shapes = {face: face._local_lightmap_shape for face in self.faces if face.has_any_lightmap}
+        lightmap_shapes = dict(reversed(sorted(lightmap_shapes.items(), key=lambda x: x[1][0] * x[1][1])))
 
         box_packer = boxpack.BoxPacker(lightmap_size)
-        for face, (lightmap, tex_coords) in lightmaps.items():
-            if not box_packer.insert(face, (lightmap.shape[1], lightmap.shape[0])):
+        for face, lightmap_shape in lightmap_shapes.items():
+            if not box_packer.insert(face, (lightmap_shape[1], lightmap_shape[0])):
                 raise Exception("Could not pack lightmaps into {} image".format(lightmap_size))
 
-        lightmap_image = np.zeros((lightmap_size[1], lightmap_size[0]), dtype=np.uint8)
+        lightmap_image = np.zeros((4, lightmap_size[1], lightmap_size[0]), dtype=np.uint8)
         tex_coords = {}
         for face, (x, y) in box_packer:
-            lm, tc = lightmaps[face]
-            lightmap_image[y:y + lm.shape[0], x:x + lm.shape[1]] = lm
+            tc = face._local_lightmap_tcs
             tex_coords[face] = (tc + (x, y)) / lightmap_size
+            for lightmap_idx in range(4):
+                if face.has_lightmap(lightmap_idx):
+                    lm = face._extract_local_lightmap(lightmap_idx)
+                    lightmap_image[lightmap_idx, y:y + lm.shape[0], x:x + lm.shape[1]] = lm
 
         return lightmap_image, tex_coords
 
@@ -524,9 +560,9 @@ class Bsp:
         self.edge_list = self._read_lump(f, self._read_dir_entry(f, 13), "<l", lambda x: x)
 
         logging.debug("Reading faces")
-        def read_face(plane_id, side, edge_list_idx, num_edges, texinfo_id, typelight, baselight, light1, light2,
+        def read_face(plane_id, side, edge_list_idx, num_edges, texinfo_id, s1, s2, s3, s4,
                       lightmap_offset):
-            return Face(self, edge_list_idx, num_edges, texinfo_id, lightmap_offset)
+            return Face(self, edge_list_idx, num_edges, texinfo_id, [s1, s2, s3, s4], lightmap_offset)
         self.faces = self._read_lump(f, self._read_dir_entry(f, 7), "<HHLHHBBBBl", read_face)
 
         logging.debug("Reading texinfo")

@@ -73,7 +73,7 @@ def _set_lightmap_uvs(mesh, faces):
     assert len(bm.faces) == len(faces)
     for bm_face, face in zip(bm.faces, faces):
         assert face.num_edges == len(bm_face.loops)
-        if face.has_lightmap:
+        if face.has_any_lightmap:
             for bm_loop, vert, tc in zip(bm_face.loops,
                                          face.vertices,
                                          face.full_lightmap_tex_coords):
@@ -232,11 +232,11 @@ class _MaterialApplier:
                                      bsp_face.leaf if sample_as_light else None,
                                      model if images.is_posable else None,
                                      self._use_lightmap,
-                                     bsp_face.has_lightmap,
+                                     bsp_face.has_any_lightmap,
                                      mat_type)
 
             bmat = self._get_material(mat_name, mat_type, texture, images, warp, sky,
-                                      bsp_face.has_lightmap)
+                                      bsp_face.has_any_lightmap)
 
             if sample_as_light:
                 self.sample_as_light_info[model][bsp_face.leaf][bmat] = tex_cfg
