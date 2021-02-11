@@ -44,18 +44,18 @@ def _texture_to_arrays(pal, texture, light_tint=(1, 1, 1, 1)):
     return blendmat.array_ims_from_indices(pal, im_indices, light_tint=light_tint, gamma=1.0)
 
 
-def _set_uvs(mesh, faces):
+def _set_uvs(mesh, texinfos, face_verts):
     mesh_uv_layer = mesh.uv_layers.new(name='texture_uvmap')
 
     bm = bmesh.new()
     bm.from_mesh(mesh)
     uv_layer = bm.loops.layers.uv[mesh_uv_layer.name]
 
-    assert len(bm.faces) == len(faces)
-    for bm_face, face in zip(bm.faces, faces):
-        assert face.num_edges == len(bm_face.loops)
-        texinfo = face.tex_info
-        for bm_loop, vert in zip(bm_face.loops, face.vertices):
+    assert len(bm.faces) == len(face_verts)
+    assert len(bm.faces) == len(texinfos)
+    for bm_face, face, texinfo in zip(bm.faces, face_verts, texinfos):
+        assert len(face) == len(bm_face.loops)
+        for bm_loop, vert in zip(bm_face.loops, face):
             s, t = texinfo.vert_to_tex_coords(vert)
             bm_loop[uv_layer].uv = s / texinfo.texture.width, t / texinfo.texture.height
 
@@ -426,15 +426,16 @@ def _load_fullbright_objects(model, map_name, pal, texture_dict, mat_applier, ma
 
 def _load_object(model_id, model, map_name, mat_applier, obj_name_prefix, use_lightmap):
     faces = [face for _, face in _get_visible_faces(model)]
+    face_verts = [list(face.vertices) for face in faces]
 
     name = f"{obj_name_prefix}{map_name}_{model_id}"
 
     mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(*_pydata_from_faces([list(face.vertices) for face in faces]))
+    mesh.from_pydata(*_pydata_from_faces(face_verts))
 
     if mat_applier is not None:
         texinfos = [face.tex_info for face in faces]
-        _set_uvs(mesh, faces)
+        _set_uvs(mesh, texinfos, face_verts)
         if use_lightmap:
             _set_lightmap_uvs(mesh, faces)
         mat_applier.apply(model, mesh, faces, 'main')
