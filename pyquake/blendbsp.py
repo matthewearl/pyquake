@@ -565,10 +565,14 @@ def add_bsp(bsp, pal, map_name, config, obj_name_prefix=''):
 
     if mat_applier is not None:
         sample_as_light_info = mat_applier.sample_as_light_info
+        posable_mats = mat_applier.posable_mats
+        animated_mats = mat_applier.animated_mats
     else:
         sample_as_light_info = {}
+        posable_mats = {m: [] for m in bsp.models}
+        animated_mats = []
 
     _add_lights(map_cfg.get('lights', {}), map_obj, obj_name_prefix)
 
     return BlendBsp(bsp, map_obj, model_objs, fullbright_objects, sample_as_light_info,
-                    mat_applier.posable_mats, mat_applier.animated_mats)
+                    posable_mats, animated_mats)
