@@ -652,8 +652,16 @@ def setup_flat_material(mat_name: str, ims: BlendMatImages, warp: bool):
     mat, nodes, links = _new_mat(mat_name)
 
     im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, warp=warp, fullbright=False)
+
     output_node = nodes.new('ShaderNodeOutputMaterial')
     links.new(output_node.inputs['Surface'], im_output)
     _create_inputs(frame_inputs, time_inputs, nodes, links)
+
+    color_mul_node = nodes.new('ShaderNodeVectorMath')
+    color_mul_node.operation = 'MULTIPLY'
+    links.new(output_node.inputs['Surface'], color_mul_node.outputs['Vector'])
+
+    links.new(color_mul_node.inputs[0], im_output)
+    color_mul_node.inputs[1].default_value = (0.25, 0.25, 0.25) if warp else (0, 0, 0)
 
     return BlendMat(mat)
