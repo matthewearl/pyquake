@@ -428,7 +428,8 @@ class ObjectManager:
                                 f"static{len(self._static_objects)}",
                                 skin,
                                 mdl_cfg,
-                                frame)
+                                frame,
+                                self._config['do_materials'])
         bm.obj.parent = self.world_obj
         bm.obj.location = origin
         bm.obj.rotation_euler = (0., 0., angles[1])
@@ -470,7 +471,8 @@ class ObjectManager:
                                     f'ent{entity_num}_{mdl_name}',
                                     skin_num,
                                     mdl_cfg,
-                                    initial_pose_num)
+                                    initial_pose_num,
+                                    self._config['do_materials'])
             bm.obj.parent = self.world_obj
             managed_obj = AliasModelManagedObject(self._fps, bm)
 

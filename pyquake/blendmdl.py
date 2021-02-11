@@ -144,7 +144,7 @@ def _create_shape_key(obj, simple_frame, vert_map):
     return shape_key
 
 
-def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
+def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num, do_materials):
     pal = np.concatenate([pal, np.ones(256)[:, None]], axis=1)
 
     # If the initial pose is a group frame, just load frames from that group.
@@ -192,49 +192,50 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num):
                 for simple_frame in group_frame.frames
             ])
 
-        # Set up material
-        sample_as_light = mdl_cfg['sample_as_light']
-        mat_name = f"{mdl_name}_skin{skin_num}"
-
-        if sample_as_light:
-            mat_name = f"{mat_name}_{obj_name}_triset{tri_set_idx}_fullbright"
-
-        if mat_name not in BLENDMATS:
-            array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(
-                pal,
-                am.skins[skin_num],
-                force_fullbright=mdl_cfg['force_fullbright']
-            )
-            im = blendmat.im_from_array(mat_name, array_im)
-            if fullbright_array_im is not None:
-                fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
-                strength = mdl_cfg['strength']
-                cam_strength = mdl_cfg.get('cam_strength', strength)
-
-                bm = blendmat.setup_fullbright_material(
-                    blendmat.BlendMatImages.from_single_pair(im, fullbright_im),
-                    mat_name,
-                    strength,
-                    cam_strength,
-                    warp=False
-                )
-            else:
-                bm = blendmat.setup_diffuse_material(
-                    blendmat.BlendMatImages.from_single_diffuse(im),
-                    mat_name,
-                    warp=False
-                )
-            bm.mat.cycles.sample_as_light = sample_as_light
+        if do_materials:
+            # Set up material
+            sample_as_light = mdl_cfg['sample_as_light']
+            mat_name = f"{mdl_name}_skin{skin_num}"
 
             if sample_as_light:
-                sample_as_light_mats.add(bm)
+                mat_name = f"{mat_name}_{obj_name}_triset{tri_set_idx}_fullbright"
 
-            BLENDMATS[mat_name] = bm
-        bm = BLENDMATS[mat_name]
+            if mat_name not in BLENDMATS:
+                array_im, fullbright_array_im, _ = blendmat.array_ims_from_indices(
+                    pal,
+                    am.skins[skin_num],
+                    force_fullbright=mdl_cfg['force_fullbright']
+                )
+                im = blendmat.im_from_array(mat_name, array_im)
+                if fullbright_array_im is not None:
+                    fullbright_im = blendmat.im_from_array(f"{mat_name}_fullbright", fullbright_array_im)
+                    strength = mdl_cfg['strength']
+                    cam_strength = mdl_cfg.get('cam_strength', strength)
 
-        # Apply the material
-        mesh.materials.append(bm.mat)
-        _set_uvs(mesh, am, tri_set)
+                    bm = blendmat.setup_fullbright_material(
+                        blendmat.BlendMatImages.from_single_pair(im, fullbright_im),
+                        mat_name,
+                        strength,
+                        cam_strength,
+                        warp=False
+                    )
+                else:
+                    bm = blendmat.setup_diffuse_material(
+                        blendmat.BlendMatImages.from_single_diffuse(im),
+                        mat_name,
+                        warp=False
+                    )
+                bm.mat.cycles.sample_as_light = sample_as_light
+
+                if sample_as_light:
+                    sample_as_light_mats.add(bm)
+
+                BLENDMATS[mat_name] = bm
+            bm = BLENDMATS[mat_name]
+
+            # Apply the material
+            mesh.materials.append(bm.mat)
+            _set_uvs(mesh, am, tri_set)
 
     return BlendMdl(am, obj, sub_objs, sample_as_light_mats,
                     initial_pose_num, group_times, shape_keys,
