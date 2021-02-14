@@ -228,7 +228,7 @@ def _setup_warp_uv(nodes, links, width, height):
     return u_time_inputs + v_time_inputs, combine_node.outputs['Vector']
 
 
-def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -> \
+def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links, output_name) -> \
         Tuple[bpy.types.NodeSocketColor, List[bpy.types.NodeSocketFloatFactor]]:
     texture_nodes = []
     for im in ims:
@@ -248,12 +248,12 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
         else:
             time_inputs = []
             uv_inputs = [texture_nodes[0].inputs['Vector']]
-            colour_output = texture_nodes[0].outputs['Color']
+            colour_output = texture_nodes[0].outputs[output_name]
     elif len(texture_nodes) > 1:
         if texture_nodes[0] is None:
             prev_output = None
         else:
-            prev_output = texture_nodes[0].outputs['Color']
+            prev_output = texture_nodes[0].outputs[output_name]
 
         mul_node = nodes.new('ShaderNodeMath')
         mul_node.operation = 'MULTIPLY'
@@ -280,11 +280,11 @@ def _setup_image_nodes(ims: Iterable[Optional[bpy.types.Image]], nodes, links) -
 
             mix_node = nodes.new('ShaderNodeMixRGB')
             if texture_node is not None:
-                links.new(mix_node.inputs['Color1'], texture_node.outputs['Color'])
+                links.new(mix_node.inputs['Color1'], texture_node.outputs[output_name])
             else:
                 mix_node.inputs['Color1'].default_value = (0, 0, 0, 1)
             if prev_output is None:
-                mix_nodes.inputs['Color2'].default_value = (0, 0, 0, 1)
+                mix_node.inputs['Color2'].default_value = (0, 0, 0, 1)
             else:
                 links.new(mix_node.inputs['Color2'], prev_output)
 
@@ -315,14 +315,15 @@ def _reduce(node_type: str, operation: str, it: Iterable[bpy.types.NodeSocket], 
     return accum
 
 
-def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, warp: bool, fullbright: bool) -> \
+def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, warp: bool, fullbright: bool,
+                           output_name: str = 'Color') -> \
         Tuple[bpy.types.NodeSocketColor,
               List[bpy.types.NodeSocketFloatFactor],
               List[bpy.types.NodeSocketFloatFactor]]:
     main_time_inputs, main_uv_inputs, main_output = _setup_image_nodes(
         ((im_pair.fullbright_im if fullbright else im_pair.im)
             for im_pair in ims.frames),
-        nodes, links
+        nodes, links, output_name
     )
 
     time_inputs = main_time_inputs
@@ -334,7 +335,7 @@ def _setup_alt_image_nodes(ims: BlendMatImages, nodes, links, warp: bool, fullbr
         alt_time_inputs, alt_uv_inputs, alt_output = _setup_image_nodes(
             ((im_pair.fullbright_im if fullbright else im_pair.im)
                 for im_pair in ims.alt_frames),
-            nodes, links
+            nodes, links, output_name
         )
 
         mix_node = nodes.new('ShaderNodeMixRGB')
@@ -613,7 +614,16 @@ def setup_lightmap_material(mat_name: str, ims: BlendMatImages,
                             style_node_groups: Dict[int, bpy.types.ShaderNodeTree]):
     mat, nodes, links = _new_mat(mat_name)
 
-    im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(ims, nodes, links, warp=warp, fullbright=False)
+    im_output, time_inputs, frame_inputs = _setup_alt_image_nodes(
+        ims, nodes, links, warp=warp, fullbright=False
+    )
+    if ims.any_fullbright:
+        fullbright_im_output, fullbright_time_inputs, fullbright_frame_inputs = _setup_alt_image_nodes(
+            ims, nodes, links, warp=warp, fullbright=True, output_name='Alpha'
+        )
+        time_inputs.extend(fullbright_time_inputs)
+        frame_inputs.extend(fullbright_frame_inputs)
+
     output_node = nodes.new('ShaderNodeOutputMaterial')
 
     color_mul_node = nodes.new('ShaderNodeVectorMath')
@@ -640,9 +650,16 @@ def setup_lightmap_material(mat_name: str, ims: BlendMatImages,
 
         links.new(lightmap_texture_node.inputs['Vector'], uv_node.outputs['UV'])
 
-    links.new(color_mul_node.inputs[1],
-              _reduce('ShaderNodeVectorMath', 'ADD', lightmap_outputs, nodes, links))
-
+    if not ims.any_fullbright:
+        links.new(color_mul_node.inputs[1],
+                  _reduce('ShaderNodeVectorMath', 'ADD', lightmap_outputs, nodes, links))
+    else:
+        mix_rgb_node = nodes.new('ShaderNodeMixRGB')
+        mix_rgb_node.inputs['Color2'].default_value = (1, 1, 1, 1)
+        links.new(color_mul_node.inputs[1], mix_rgb_node.outputs['Color'])
+        links.new(mix_rgb_node.inputs['Color1'],
+                  _reduce('ShaderNodeVectorMath', 'ADD', lightmap_outputs, nodes, links))
+        links.new(mix_rgb_node.inputs['Fac'], fullbright_im_output)
     _create_inputs(frame_inputs, time_inputs, nodes, links)
 
     return BlendMat(mat)
