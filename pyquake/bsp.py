@@ -22,6 +22,7 @@ __all__ = (
     'Bsp',
     'MalformedBspFile',
     'get_tex_coords',
+    'LightmapTooSmall',
 )
 
 
@@ -40,11 +41,29 @@ from . import ent
 from . import simplex
 
 
+_MIN_LIGHTMAP_SIZE = 512
+_MAX_LIGHTMAP_SIZE = 4096
+
+
+class LightmapTooSmall(Exception):
+    pass
+
+
 def _listify(f):
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
         return list(f(*args, **kwargs))
     return wrapped
+
+
+class BspVersion(enum.IntEnum):
+    BSP = 29
+    _2PSB = struct.unpack("<L", b"2PSB")[0]
+    BSP2 = struct.unpack("<L", b"BSP2")[0]
+
+    @property
+    def uses_longs(self):
+        return self != BspVersion.BSP
 
 
 class PlaneType(enum.Enum):
@@ -459,15 +478,14 @@ class Bsp:
     def textures_by_name(self):
         return {t.name: t for t in self.textures.values()}
 
-    @functools.lru_cache(1)
-    def _make_full_lightmap(self, lightmap_size=(512, 512)):
+    def _make_full_lightmap_fixed_size(self, lightmap_size):
         lightmap_shapes = {face: face._local_lightmap_shape for face in self.faces if face.has_any_lightmap}
         lightmap_shapes = dict(reversed(sorted(lightmap_shapes.items(), key=lambda x: x[1][0] * x[1][1])))
 
         box_packer = boxpack.BoxPacker(lightmap_size)
         for face, lightmap_shape in lightmap_shapes.items():
             if not box_packer.insert(face, (lightmap_shape[1], lightmap_shape[0])):
-                raise Exception("Could not pack lightmaps into {} image".format(lightmap_size))
+                raise LightmapTooSmall
 
         lightmap_image = np.zeros((4, lightmap_size[1], lightmap_size[0]), dtype=np.uint8)
         tex_coords = {}
@@ -480,6 +498,21 @@ class Bsp:
                     lightmap_image[lightmap_idx, y:y + lm.shape[0], x:x + lm.shape[1]] = lm
 
         return lightmap_image, tex_coords
+
+    @functools.lru_cache(1)
+    def _make_full_lightmap(self):
+        lightmap_size = _MIN_LIGHTMAP_SIZE
+        while lightmap_size <= _MAX_LIGHTMAP_SIZE:
+            try:
+                out = self._make_full_lightmap_fixed_size((lightmap_size, lightmap_size))
+                logging.debug('Packed lightmap into %d x %d image',
+                              lightmap_size, lightmap_size)
+                return out
+            except LightmapTooSmall:
+                pass
+            lightmap_size *= 2
+
+        raise LightmapTooSmall(f"Could not pack lightmaps into {lightmap_size} image")
 
     @property
     def full_lightmap_image(self):
@@ -546,15 +579,14 @@ class Bsp:
                 if offs != -1}
 
     def __init__(self, f):
-        version, = struct.unpack("<I", self._read(f, 4))
-        if version != 29:
-            raise MalformedBspFile("Unsupported version {} (should be 29)".format(version))
+        version = BspVersion(struct.unpack("<I", self._read(f, 4))[0])
 
         logging.debug("Reading vertices")
         self.vertices = self._read_lump(f, self._read_dir_entry(f, 3), "<fff")
 
         logging.debug("Reading edges")
-        self.edges = self._read_lump(f, self._read_dir_entry(f, 12), "<HH")
+        self.edges = self._read_lump(f, self._read_dir_entry(f, 12),
+                                     "<LL" if version.uses_longs else "<HH")
 
         logging.debug("Reading edge list")
         self.edge_list = self._read_lump(f, self._read_dir_entry(f, 13), "<l", lambda x: x)
@@ -563,7 +595,9 @@ class Bsp:
         def read_face(plane_id, side, edge_list_idx, num_edges, texinfo_id, s1, s2, s3, s4,
                       lightmap_offset):
             return Face(self, edge_list_idx, num_edges, texinfo_id, [s1, s2, s3, s4], lightmap_offset)
-        self.faces = self._read_lump(f, self._read_dir_entry(f, 7), "<HHLHHBBBBl", read_face)
+        self.faces = self._read_lump(f, self._read_dir_entry(f, 7),
+                                     "<LLLLLBBBBl" if version.uses_longs else "<HHLHHBBBBl",
+                                     read_face)
 
         logging.debug("Reading texinfo")
         def read_texinfo(vs1, vs2, vs3, ds, vt1, vt2, vt3, dt, texture_id, flags):
@@ -589,17 +623,31 @@ class Bsp:
         def read_node(plane_id, c1, c2, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_id, num_faces):
             bbox = BBox((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
             return Node(self, plane_id, (c1, c2), bbox, face_id, num_faces)
-        self.nodes = self._read_lump(f, self._read_dir_entry(f, 5), "<lhhhhhhhhHH", read_node)
+        if version == BspVersion.BSP:
+            node_fmt = "<lhhhhhhhhHH"
+        elif version == BspVersion._2PSB:
+            node_fmt = "<lllhhhhhhLL"
+        elif version == BspVersion.BSP2:
+            node_fmt = "<lllffffffLL"
+        self.nodes = self._read_lump(f, self._read_dir_entry(f, 5), node_fmt, read_node)
 
         logging.debug("Reading leaves")
         def read_leaf(contents, vis_offset, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_list_idx, num_faces, l1, l2,
                       l3, l4):
             bbox = BBox((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
             return Leaf(self, contents, vis_offset, bbox, face_list_idx, num_faces)
-        self.leaves = self._read_lump(f, self._read_dir_entry(f, 10), "<llhhhhhhHHBBBB", read_leaf)
+        if version == BspVersion.BSP:
+            leaf_fmt = "<llhhhhhhHHBBBB"
+        elif version == BspVersion._2PSB:
+            leaf_fmt = "<llhhhhhhLLBBBB"
+        elif version == BspVersion.BSP2:
+            leaf_fmt = "<llffffffLLBBBB"
+        self.leaves = self._read_lump(f, self._read_dir_entry(f, 10), leaf_fmt, read_leaf)
 
         logging.debug("Reading face list")
-        self.face_list = self._read_lump(f, self._read_dir_entry(f, 11), "<H", lambda x: x)
+        self.face_list = self._read_lump(f, self._read_dir_entry(f, 11),
+                                         "<L" if version.uses_longs else "<H",
+                                         lambda x: x)
 
         logging.debug("Reading planes")
         def read_plane(n1, n2, n3, d, plane_type):
