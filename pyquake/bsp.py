@@ -35,6 +35,7 @@ from typing import NamedTuple, Tuple, List, Iterable
 
 import numpy as np
 
+from . import boxpack
 from . import ent
 from . import simplex
 
@@ -87,6 +88,14 @@ class Node(NamedTuple):
         else:
             return self.bsp.nodes[self.child_ids[child_num]]
 
+    @property
+    def leaves(self):
+        for child_num in range(2):
+            if self.child_is_leaf(child_num):
+                yield self.get_child(child_num)
+            else:
+                yield from self.get_child(child_num).leaves
+
     def _get_childs_leaves_from_simplex(self, child_num: int, sx: simplex.Simplex) -> Iterable["Leaf"]:
         if self.child_is_leaf(child_num):
             l = self.get_child(child_num)
@@ -110,6 +119,16 @@ class Node(NamedTuple):
             yield from self._get_childs_leaves_from_simplex(0, infront_sx)
             behind_sx = sx.add_constraint(-p)
             yield from self._get_childs_leaves_from_simplex(1, behind_sx)
+
+    def _generate_leaf_paths(self):
+        for child_num in range(2):
+            if self.child_is_leaf(child_num):
+                leaf = self.get_child(child_num)
+                yield leaf, [child_num]
+            else:
+                child_node = self.get_child(child_num)
+                for leaf, path in child_node._generate_leaf_paths():
+                    yield leaf, [child_num] + path
 
 
 class Leaf(NamedTuple):
@@ -149,12 +168,37 @@ class Leaf(NamedTuple):
     def visible_faces(self):
         return (face for leaf in self.visible_leaves for face in leaf.faces)
 
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.leaves.index(self)
+
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+
+    @property
+    @functools.lru_cache(None)
+    def simplex(self):
+        model = self.bsp._leaf_to_model[self]
+        path = self.bsp._leaf_to_path[self]
+        node = model.node
+        sx = simplex.Simplex.from_bbox(node.bbox.mins, node.bbox.maxs)
+        for child_num in path:
+            p = np.concatenate([node.plane.normal, [-node.plane.dist]])
+            sx = sx.add_constraint(p if child_num == 0 else -p)
+            node = node.get_child(child_num)
+        return sx
+
 
 class Face(NamedTuple):
     bsp: "Bsp"
     edge_list_idx: int
     num_edges: int
     texinfo_id: int
+    styles: List[int]
     lightmap_offset: int
 
     @property
@@ -173,6 +217,10 @@ class Face(NamedTuple):
     @property
     def tex_coords(self):
         return [self.tex_info.vert_to_tex_coords(v) for v in self.vertices]
+
+    @property
+    def full_lightmap_tex_coords(self):
+        return self.bsp._full_lightmap_tex_coords[self]
 
     @property
     def tex_info(self):
@@ -223,6 +271,64 @@ class Face(NamedTuple):
     def centroid(self):
         return np.array(list(self.vertices)).mean(axis=0)
 
+    @property
+    def leaf(self):
+        return self.bsp._face_to_leaf[self]
+
+    @property
+    def has_any_lightmap(self):
+        return self.lightmap_offset != -1
+
+    def has_lightmap(self, lightmap_idx):
+        return self.has_any_lightmap and self.styles[lightmap_idx] != 255
+
+    @property
+    def _local_lightmap_shape(self):
+        tex_coords = np.array(list(self.tex_coords))
+
+        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+
+        size = (maxs - mins) + 1
+        return (size[1], size[0])
+
+    @property
+    def _local_lightmap_tcs(self):
+        tex_coords = np.array(list(self.tex_coords))
+
+        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+
+        tex_coords -= mins * 16
+        tex_coords += 8
+        tex_coords /= 16.
+
+        return tex_coords
+
+    def _extract_local_lightmap(self, lightmap_idx):
+        assert self.has_lightmap(lightmap_idx)
+
+        shape = self._local_lightmap_shape
+        size = shape[0] * shape[1]
+
+        idx = 0
+        for i in range(lightmap_idx):
+            if self.has_lightmap(i):
+                idx += 1
+
+        lightmap = np.array(list(
+            self.bsp.lightmap[self.lightmap_offset + size * idx:
+                              self.lightmap_offset + size * (idx + 1)]
+        )).reshape(shape)
+
+        return lightmap
+
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
+
 
 class TexInfo(NamedTuple):
     bsp: "Bsp"
@@ -267,12 +373,27 @@ class Model(NamedTuple):
     def node(self):
         return self.bsp.nodes[self.node_id]
 
+    def get_simplex_from_point(self, point):
+        sx = simplex.Simplex.from_bbox(self.node.bbox.mins, self.node.bbox.maxs)
+        point = np.array(point)
+        node = self.node
+        while True:
+            plane = node.plane
+            child_num = 0 if _infront(point, plane.normal, plane.dist) else 1
+            p = np.concatenate([plane.normal, [-plane.dist]])
+            sx = sx.add_constraint(p if child_num == 0 else -p)
+            if node.child_is_leaf(child_num):
+                break
+            node = node.get_child(child_num)
+
+        return sx, node.get_child(child_num)
+
     def get_leaf_from_point(self, point):
         point = np.array(point)
         node = self.node
         while True:
             child_num = 0 if _infront(point, node.plane.normal, node.plane.dist) else 1
-            child = node.get_child(child_num) 
+            child = node.get_child(child_num)
             if node.child_is_leaf(child_num):
                 return child
             node = child
@@ -282,6 +403,17 @@ class Model(NamedTuple):
         n = self.node
         sx = simplex.Simplex.from_bbox(bbox.mins, bbox.maxs)
         return n.get_leaves_from_simplex(sx)
+
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.models.index(self)
+
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
 
 
 class Texture(NamedTuple):
@@ -293,6 +425,9 @@ class Texture(NamedTuple):
     def __hash__(self):
         return hash(id(self))
 
+    def __eq__(self, other):
+        return id(self) == id(other)
+
 
 _DirEntry = collections.namedtuple('_DirEntry', ('offset', 'size'))
 
@@ -303,6 +438,59 @@ class MalformedBspFile(Exception):
 
 class Bsp:
     """A BSP file parser, and interface to the information directly contained within."""
+
+    @property
+    @functools.lru_cache(None)
+    def _face_to_leaf(self):
+        return {face: leaf for leaf in self.leaves for face in leaf.faces}
+
+    @property
+    @functools.lru_cache(None)
+    def _leaf_to_model(self):
+        return {leaf: model for model in self.models for leaf in model.node.leaves}
+
+    @property
+    @functools.lru_cache(None)
+    def _leaf_to_path(self):
+        return {leaf: path for m in self.models for leaf, path in m.node._generate_leaf_paths()}
+
+    @property
+    @functools.lru_cache(None)
+    def textures_by_name(self):
+        return {t.name: t for t in self.textures.values()}
+
+    @functools.lru_cache(1)
+    def _make_full_lightmap(self, lightmap_size=(512, 512)):
+        lightmap_shapes = {face: face._local_lightmap_shape for face in self.faces if face.has_any_lightmap}
+        lightmap_shapes = dict(reversed(sorted(lightmap_shapes.items(), key=lambda x: x[1][0] * x[1][1])))
+
+        box_packer = boxpack.BoxPacker(lightmap_size)
+        for face, lightmap_shape in lightmap_shapes.items():
+            if not box_packer.insert(face, (lightmap_shape[1], lightmap_shape[0])):
+                raise Exception("Could not pack lightmaps into {} image".format(lightmap_size))
+
+        lightmap_image = np.zeros((4, lightmap_size[1], lightmap_size[0]), dtype=np.uint8)
+        tex_coords = {}
+        for face, (x, y) in box_packer:
+            tc = face._local_lightmap_tcs
+            tex_coords[face] = (tc + (x, y)) / lightmap_size
+            for lightmap_idx in range(4):
+                if face.has_lightmap(lightmap_idx):
+                    lm = face._extract_local_lightmap(lightmap_idx)
+                    lightmap_image[lightmap_idx, y:y + lm.shape[0], x:x + lm.shape[1]] = lm
+
+        return lightmap_image, tex_coords
+
+    @property
+    def full_lightmap_image(self):
+        lightmap_image, tex_coords = self._make_full_lightmap()
+        return lightmap_image
+
+    @property
+    def _full_lightmap_tex_coords(self):
+        lightmap_image, tex_coords = self._make_full_lightmap()
+        return tex_coords
+
     def _read(self, f, n):
         b = f.read(n)
         if len(b) < n:
@@ -372,9 +560,9 @@ class Bsp:
         self.edge_list = self._read_lump(f, self._read_dir_entry(f, 13), "<l", lambda x: x)
 
         logging.debug("Reading faces")
-        def read_face(plane_id, side, edge_list_idx, num_edges, texinfo_id, typelight, baselight, light1, light2,
+        def read_face(plane_id, side, edge_list_idx, num_edges, texinfo_id, s1, s2, s3, s4,
                       lightmap_offset):
-            return Face(self, edge_list_idx, num_edges, texinfo_id, lightmap_offset)
+            return Face(self, edge_list_idx, num_edges, texinfo_id, [s1, s2, s3, s4], lightmap_offset)
         self.faces = self._read_lump(f, self._read_dir_entry(f, 7), "<HHLHHBBBBl", read_face)
 
         logging.debug("Reading texinfo")

@@ -43,6 +43,10 @@ class FrameType(enum.IntEnum):
     GROUP = 1
 
 
+class ModelFlags(enum.IntFlag):
+    ROTATE = 8      # EF_ROTATE
+
+
 class BaseFrame:
     frame_type: FrameType
 
@@ -106,7 +110,7 @@ class AliasModel:
                 'num_tris': num_tris,
                 'num_frames': num_frames,
                 'sync_type': sync_type,
-                'flags': flags,
+                'flags': ModelFlags(flags),
                 'size': size}
 
     def _read_skin(self, f):

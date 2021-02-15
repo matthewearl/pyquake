@@ -14,10 +14,12 @@ setup(name='Pyquake',
                 'aiodgram = pyquake.aiodgram:main',
                 'demo_parser = pyquake.proto:demo_parser_main',
                 'pyq_monitor_demos = pyquake.demo:monitor_demos',
+                'pyq_extract_lights = pyquake.mapsource:extract_lights_main',
+                'pyq_pak_extract = pyquake.pak:pak_extract_main',
           ]
       },
       description='Python Quake client',
-      install_requires=['numpy', 'scipy'],
+      install_requires=['numpy', 'scipy', 'parsley'],
       author='Matt Earl',
       packages=['pyquake'])
 

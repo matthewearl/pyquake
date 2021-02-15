@@ -26,6 +26,8 @@ __all__ = (
 )
 
 
+import dataclasses
+import functools
 from typing import NamedTuple
 
 import numpy as np
@@ -52,7 +54,8 @@ class Infeasible(Exception):
     pass
 
 
-class Simplex(NamedTuple):
+@dataclasses.dataclass(eq=False)
+class Simplex:
     dim: int
     constraints: np.ndarray
     basic_mask: np.ndarray
@@ -72,6 +75,7 @@ class Simplex(NamedTuple):
         return cls(dim, constraints, basic_mask)
 
     @property
+    @functools.lru_cache(None)
     def vert_to_world(self):
         M = np.concatenate([self.constraints[~self.basic_mask], _one_hot_encode(self.dim, self.dim + 1)[None, :]])
         return np.linalg.inv(M)
@@ -85,21 +89,23 @@ class Simplex(NamedTuple):
         B = self.constraints[self.basic_mask] @ self.vert_to_world
 
         delta = -B[:, -1] / B[:, free_idx]
+        delta[B[:, free_idx] >= 0] = np.inf
         delta[delta < 0] = np.inf
+        delta[np.isnan(delta)] = np.inf
         basic_idx = np.argmin(delta)
 
         # pivot
         new_basic_mask = self.basic_mask.copy()
         new_basic_mask[np.where(~self.basic_mask)[0][free_idx]] = True
         new_basic_mask[np.where(self.basic_mask)[0][basic_idx]] = False
-        
+
         return Simplex(self.dim, self.constraints, new_basic_mask)
 
     def iterate(self, c):
         # Transform the optimization axis similarly, select an edge to traverse.
         c = c @ self.vert_to_world[:self.dim, :self.dim]
         for free_idx in range(self.dim):
-            if c[free_idx] > 0:
+            if c[free_idx] > 1e-5:
                 break
         else:
             raise AlreadyOptimal
@@ -194,3 +200,18 @@ class Simplex(NamedTuple):
         new_constraints = np.concatenate([s.constraints, p[None, :]])
         new_basic_mask = np.concatenate([s.basic_mask, [True]])
         return Simplex(self.dim, new_constraints, new_basic_mask)
+
+    def simplify(self):
+        # Remove constraints which do not affect the feasible solution.
+        reachable = np.full(len(self.constraints), False)
+        for idxs, pos in self.find_verts():
+            for idx in idxs:
+                reachable[idx] = True
+        return Simplex(self.dim, self.constraints[reachable], self.basic_mask[reachable])
+
+
+    def intersect(self, other):
+        s = self
+        for p in other.constraints:
+            s = s.add_constraint(p)
+        return s

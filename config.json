@@ -1,7 +1,58 @@
 {
+    "do_materials": true,
+    "use_lightmap": true,
+    "models": {
+        "__default__": {
+            "sample_as_light": false,
+            "force_fullbright": false,
+            "strength": 1
+        },
+        "m_g_key": {
+            "force_fullbright": true,
+            "strength": 1
+        },
+        "w_s_key": {
+            "force_fullbright": true,
+            "strength": 1
+        },
+        "flame": {
+            "sample_as_light": true,
+            "strength": 10000,
+            "cam_strength": 1,
+            "no_anim": true,
+            "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
+        },
+        "flame2": {
+            "sample_as_light": true,
+            "strength": 10000,
+            "cam_strength": 1,
+            "no_anim": true,
+            "bbox": [[-1024, -1024, -1024], [1024, 1024, 1024]]
+        },
+        "lavaball": {
+            "sample_as_light": true,
+            "strength": 1000,
+            "bbox": [[-512, -512, -512], [512, 512, 512]],
+            "cam_strength": 1
+        },
+        "boss": {
+            "sample_as_light": false,
+            "strength": 1
+        }
+    },
     "maps": {
+        "__bsp_model__": {
+            "fullbright_object_overlay": false,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": false
+                }
+            }
+        },
         "100m": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -66,8 +117,44 @@
                 }
             }
         },
+        "start": {
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "tlight07": {
+                    "strength": 1000,
+                    "sample_as_light": true,
+                    "tint": [1, 1, 3.33, 1],
+                    "bbox": [[-768, -768, -768], [768, 768, 768]]
+                },
+                "sliplite": {
+                    "strength": 100,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                },
+                "slipside": {
+                    "strength": 100,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                }
+            }
+        },
         "e1m1": {
-            "do_materials": true,
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
@@ -78,39 +165,346 @@
                 },
                 "tlight02": {
                     "strength": 30,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 },
                 "tlight07": {
                     "strength": 1000,
                     "sample_as_light": true,
-                    "tint": [1, 1, 3.33, 1]
+                    "tint": [1, 1, 3.33, 1],
+                    "bbox": [[-768, -768, -768], [768, 768, 768]]
                 },
                 "tlight11": {
                     "strength": 1000,
                     "sample_as_light": true,
-                    "tint": [1, 0.85, 0.7, 1]
+                    "tint": [1, 0.85, 0.7, 1],
+                    "bbox": [[-512, -512, -512], [512, 512, 512]]
                 },
                 "tlight01": {
                     "strength": 10000,
                     "sample_as_light": true,
-                    "tint": [1, 0.8, 1, 1]
+                    "tint": [1, 0.8, 1, 1],
+                    "bbox": [[-256, -256, -256], [256, 256, 256]]
                 },
                 "sliplite": {
                     "strength": 100,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 },
                 "slipside": {
                     "strength": 100,
-                    "sample_as_light": false
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
                 },
                 "+0basebtn": {
-                    "strength": 1000,
+                    "strength": 50,
                     "sample_as_light": false
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [0.102, -0.454, -0.026],
+                    "location": [0, 0, 0]
+                },
+                "light78": {
+                    "type": "POINT",
+                    "location": [800.0, 2816.0, 24.0],
+                    "energy": 20.0
+                },
+                "light95": {
+                    "type": "POINT",
+                    "location": [832.0, 2360.0, 112.0],
+                    "energy": 100.0
+                },
+                "light108": {
+                    "type": "POINT",
+                    "location": [832.0, 2104.0, -208.0],
+                    "energy": 20
                 }
             }
         },
         "e1m2": {
-            "do_materials": true,
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                },
+                "light12": {
+                    "type": "POINT",
+                    "location": [1176.0, -912.0, 672.0],
+                    "energy": 200.0
+                },
+                "light170": {
+                    "type": "POINT",
+                    "location": [880.0, -376.0, 304.0],
+                    "energy": 20.0
+                },
+                "light220": {
+                    "type": "POINT",
+                    "location": [1560.0, -568.0, 224.0],
+                    "energy": 200.0
+                },
+                "light235": {
+                    "type": "POINT",
+                    "location": [1392.0, 240.0, 384.0],
+                    "energy": 50.0
+                },
+                "light239": {
+                    "type": "POINT",
+                    "location": [816.0, 208.0, 368.0],
+                    "energy": 50.0
+                },
+                "light121": {
+                    "type": "POINT",
+                    "location": [-612.0, -500.0, 548.0],
+                    "energy": 50.0
+                }
+            }
+        },
+        "e1m3": {
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                },
+                "light7": {
+                    "type": "POINT",
+                    "location": [-176.0, -1616.0, 320.0],
+                    "energy": 100.0
+                },
+                "light20": {
+                    "type": "POINT",
+                    "location": [-952.0, -936.0, 8.0],
+                    "energy": 50.0
+                },
+                "light146": {
+                    "type": "POINT",
+                    "location": [568.0, -248.0, -256.0],
+                    "energy": 20.0
+                },
+                "light84": {
+                    "type": "POINT",
+                    "location": [1344.0, 160.0, -32.0],
+                    "energy": 225.0
+                }
+            }
+        },
+        "e1m4": {
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                },
+                "light14": {
+                    "type": "POINT",
+                    "location": [696.0, 1112.0, 816.0],
+                    "energy": 300.0
+                },
+                "light16": {
+                    "type": "POINT",
+                    "location": [688.0, 496.0, 810.0],
+                    "energy": 25.0
+                }
+            }
+        },
+        "e1m5": {
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "metal6_3": {
+                    "strength": 50,
+                    "overlay": true,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.432, 0.288, 0.355],
+                    "location": [0, 0, 0]
+                },
+                "light95": {
+                    "type": "POINT",
+                    "location": [-544.0, 1880.0, -196.0],
+                    "energy": 10.0
+                },
+                "light25": {
+                    "type": "POINT",
+                    "location": [-544.0, 1272.0, 368.0],
+                    "energy": 100.0
+                },
+                "light71": {
+                    "type": "POINT",
+                    "location": [700.0, 1676.0, 12.0],
+                    "energy": 5.0
+                }
+            }
+        },
+        "e1m6": {
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": false
+                },
+                "key03_02": {
+                    "strength": 200,
+                    "sample_as_light": false
+                },
+                "*lava1": {
+                    "strength": 100,
+                    "sample_as_light": false
+                },
+                "metal6_3": {
+                    "strength": 50,
+                    "overlay": true,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                },
+                "rune_a": {
+                    "strength": 50,
+                    "overlay": true,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 1.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [0.440, 0.069, 0],
+                    "location": [0, 0, 0]
+                },
+                "light2": {
+                    "type": "POINT",
+                    "location": [520.0, 904.0, 272.0],
+                    "energy": 100.0
+                },
+                "light15": {
+                    "type": "POINT",
+                    "location": [192.0, 864, 16.6],
+                    "energy": 10.0
+                },
+                "light117": {
+                    "type": "POINT",
+                    "location": [480.0, 504.0, 80.0],
+                    "energy": 50.0
+                },
+                "light171": {
+                    "type": "POINT",
+                    "location": [672.0, 288.0, 0.0],
+                    "energy": 10.0
+                },
+                "light176": {
+                    "type": "POINT",
+                    "location": [480.0, 920.0, 104.0],
+                    "energy": 50.0
+                }
+            }
+        },
+        "e1m7": {
+            "fullbright_object_overlay": true,
+            "textures": {
+                "__default__": {
+                    "strength": 1,
+                    "sample_as_light": false,
+                    "tint": [1, 1, 1, 1],
+                    "overlay": true
+                },
+                "*lava1": {
+                    "strength": 100,
+                    "sample_as_light": false
+                },
+                "rune_a": {
+                    "strength": 50,
+                    "overlay": true,
+                    "sample_as_light": true,
+                    "bbox": [[-64, -64, -64], [64, 64, 64]]
+                }
+            },
+            "lights": {
+                "sun": {
+                    "type": "SUN",
+                    "energy": 10.0,
+                    "color": [1.0, 1.0, 1.0],
+                    "angle": 0.087,
+                    "rotation": [-0.353, 0.259, 0.376],
+                    "location": [0, 0, 0]
+                },
+                "light8": {
+                    "type": "POINT",
+                    "location": [-256.0, 64.0, 120.0],
+                    "energy": 50
+                },
+                "light59": {
+                    "type": "POINT",
+                    "location": [840.0, 56.0, -288.0],
+                    "energy": 25
+                },
+                "light55": {
+                    "type": "POINT",
+                    "location": [840.0, 64.0, -976.0],
+                    "energy": 10.0
+                }
+            }
+        },
+        "e2m1": {
             "fullbright_object_overlay": true,
             "textures": {
                 "__default__": {
