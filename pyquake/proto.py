@@ -424,6 +424,12 @@ class ServerMessageSignOnNum(StructServerMessage):
 
 
 @_register_server_message
+class ServerMessageSetPause(StructServerMessage):
+    fmt = "<B"
+    field_names = ("paused",)
+    msg_type = ServerMessageType.SETPAUSE
+
+@_register_server_message
 class ServerMessageSpawnBaseline(ServerMessage):
     field_names = ("entity_num", "model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNBASELINE
