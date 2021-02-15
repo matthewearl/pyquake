@@ -42,11 +42,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.interpolate
 import inotify_simple
+import matplotlib
 
 from . import proto
 from . import progress
 
 
+matplotlib.use('GTK3Agg')
 logger = logging.getLogger(__name__)
 
 
@@ -435,7 +437,7 @@ def _monitor_demo_file(f, demo_dir_name, checkpoint_info, comparison_plot):
     logger.info('Finished reading file')
 
 
-_DEMO_RE = r'(x|demo(\d)+)\.dem'
+_DEMO_RE = r'(temp_demo|demo(\d)+)\.dem'
 
 def monitor_demos():
     import sys
