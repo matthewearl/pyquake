@@ -118,7 +118,7 @@
             }
         },
         "400m": {
-            "fullbright_object_overlay": true,
+            "fullbright_object_overlay": false,
             "textures": {
                 "__default__": {
                     "strength": 1,

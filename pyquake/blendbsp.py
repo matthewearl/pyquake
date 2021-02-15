@@ -270,6 +270,7 @@ class _MaterialApplier:
 def _get_visible_faces(model):
     return [(face_id, face)
             for face_id, face in zip(range(model.first_face_idx, model.first_face_idx + model.num_faces), model.faces)
+            if face.tex_info.texture_exists
             if face.tex_info.texture.name != 'trigger']
 
 

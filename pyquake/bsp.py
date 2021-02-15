@@ -363,6 +363,10 @@ class TexInfo(NamedTuple):
         return self.bsp.textures[self.texture_id]
 
     @property
+    def texture_exists(self):
+        return self.texture_id in self.bsp.textures
+
+    @property
     def texel_area(self):
         return np.linalg.norm(np.cross(self.vec_s, self.vec_t))
 
