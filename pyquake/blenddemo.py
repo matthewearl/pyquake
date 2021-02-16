@@ -665,9 +665,10 @@ class ObjectManager:
             obj.done(final_time)
 
         # Make the view entity invisible to camera rays
-        for (entity_num, model_num), obj in self._objs.items():
-            if entity_num == self._view_entity_num and model_num != 0:
-                obj.set_invisible_to_camera()
+        if self._config['hide_view_entity']:
+            for (entity_num, model_num), obj in self._objs.items():
+                if entity_num == self._view_entity_num and model_num != 0:
+                    obj.set_invisible_to_camera()
 
         # Set start / end frame
         if self._first_update_time is not None:

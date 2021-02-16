@@ -1,6 +1,7 @@
 {
     "do_materials": true,
     "use_lightmap": true,
+    "hide_view_entity": false,
     "models": {
         "__default__": {
             "sample_as_light": false,
@@ -38,6 +39,10 @@
         "boss": {
             "sample_as_light": false,
             "strength": 1
+        },
+        "player": {
+            "force_fullbright": true,
+            "strength": 0.05
         }
     },
     "maps": {
@@ -133,7 +138,7 @@
                     "energy": 10.0,
                     "color": [1.0, 1.0, 1.0],
                     "angle": 0.087,
-                    "rotation": [-0.432, 0.288, 0.355],
+                    "rotation": [0.521, 0.819, 1.061],
                     "location": [0, 0, 0]
                 }
             }
@@ -154,7 +159,7 @@
                     "energy": 10.0,
                     "color": [1.0, 1.0, 1.0],
                     "angle": 0.087,
-                    "rotation": [-0.432, 0.288, 0.355],
+                    "rotation": [0.521, 0.819, 1.061],
                     "location": [0, 0, 0]
                 }
             }
