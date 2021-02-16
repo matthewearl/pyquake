@@ -335,11 +335,10 @@ class NullManagedObject(ManagedObject):
 
 class ObjectManager:
     def __init__(self, fs, config, fps, fov, width, height, world_obj_name='demo', load_level=True):
-        assert load_level, "Not yet supported"
-
         self._fs = fs
         self._fps = fps
         self._config = config
+        self._load_level = load_level
 
         self._pal = np.fromstring(fs['gfx/palette.lmp'], dtype=np.uint8).reshape(256, 3) / 255
 
@@ -375,10 +374,6 @@ class ObjectManager:
     def set_intermission(self, i: bool):
         self._intermission = i
 
-    @functools.lru_cache(1024)
-    def _leaf_from_pos(self, pos):
-        return self._bb.bsp.models[0].get_leaf_from_point(pos)
-
     def _path_to_bsp_name(self, bsp_path):
         m = re.match(r"maps/([a-zA-Z0-9_]+).bsp", bsp_path)
         if m is None:
@@ -390,18 +385,19 @@ class ObjectManager:
             raise Exception("Model paths already set")
         self._model_paths = model_paths
 
-        map_path = self._model_paths[0]
-        logger.info('Parsing bsp %s', map_path)
-        b = bsp.Bsp(self._fs.open(map_path))
-        map_name = self._path_to_bsp_name(map_path)
-        logger.info('Adding bsp %s', map_path)
-        self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
-        self._bb.map_obj.parent = self.world_obj
-        self._bb.hide_all_but_main()
+        if self._load_level:
+            map_path = self._model_paths[0]
+            logger.info('Parsing bsp %s', map_path)
+            b = bsp.Bsp(self._fs.open(map_path))
+            map_name = self._path_to_bsp_name(map_path)
+            logger.info('Adding bsp %s', map_path)
+            self._bb = blendbsp.add_bsp(b, self._pal, map_name, self._config)
+            self._bb.map_obj.parent = self.world_obj
+            self._bb.hide_all_but_main()
 
-        self._sample_as_light_objects.extend(
-            LeafSampleAsLightObject.create_from_bsp(self._bb)
-        )
+            self._sample_as_light_objects.extend(
+                LeafSampleAsLightObject.create_from_bsp(self._bb)
+            )
 
     def _path_to_model_name(self, mdl_path):
         m = re.match(r"progs/([A-Za-z0-9-_]*)\.mdl", mdl_path)
@@ -458,8 +454,11 @@ class ObjectManager:
             # Used to make objects disappear, eg. player at the end of the level
             managed_obj = NullManagedObject(self._fps)
         elif model_path.startswith('*'):
-            map_model_idx = int(model_path[1:])
-            managed_obj = BspModelManagedObject(self._fps, self._bb, map_model_idx)
+            if self._load_level:
+                map_model_idx = int(model_path[1:])
+                managed_obj = BspModelManagedObject(self._fps, self._bb, map_model_idx)
+            else:
+                managed_obj = NullManagedObject(self._fps)
         elif model_path.endswith('.mdl'):
             am = self._load_alias_model(model_path)
             mdl_name = self._path_to_model_name(model_path)
@@ -536,6 +535,10 @@ class ObjectManager:
         return intersect
 
     def _update_sample_as_light(self, view_origin, view_angles, blender_frame, crude_test=True):
+        if not self._load_level:
+            # No PVS info so can't update sample as lights
+            return
+
         start = time.perf_counter()
         view_pvs = set(self._bb.bsp.models[0].get_leaf_from_point(view_origin).visible_leaves)
 
