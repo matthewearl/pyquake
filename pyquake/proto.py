@@ -24,6 +24,7 @@ __all__ = (
 )
 
 
+import dataclasses
 import enum
 import inspect
 import math
@@ -39,6 +40,29 @@ def _read(f, n):
     if len(s) != n:
         raise MalformedNetworkData
     return s
+
+
+class ProtocolFlags(enum.IntFlag):
+    SHORTANGLE = (1 << 1)
+    FLOATANGLE = (1 << 2)
+    _24BITCOORD = (1 << 3)
+    FLOATCOORD = (1 << 4)
+    EDICTSCALE = (1 << 5)
+    ALPHASANITY = (1 << 6)
+    INT32COORD = (1 << 7)
+    MOREFLAGS = (1 << 31)
+
+
+class ProtocolNum(enum.IntEnum):
+    NETQUAKE = 15
+    FITZQUAKE = 666
+    RMQ = 999
+
+
+@dataclasses.dataclass
+class Protocol:
+    num: ProtocolNum
+    flags: ProtocolFlags
 
 
 class TempEntityTypes(enum.IntEnum):
@@ -96,6 +120,14 @@ class ServerMessageType(enum.Enum):
     CUTSCENE = 34
     UPDATE = 128
 
+    # protocol 666 message types
+    SKYBOX = 37
+    BF = 40
+    FOG = 41
+    SPAWNBASELINE2 = 42
+    SPAWNSTATIC2 = 43
+    SPAWNSTATICSOUND2 = 44
+
 
 class ItemFlags(enum.IntFlag):
     SHOTGUN = 1
@@ -144,6 +176,22 @@ class _UpdateFlags(enum.IntFlag):
     EFFECTS = (1<<13)
     LONGENTITY = (1<<14)
 
+    # protocol 666 flags
+    EXTEND1 = (1<<15)
+    ALPHA = (1<<16)
+    FRAME2 = (1<<17)
+    MODEL2 = (1<<18)
+    LERPFINISH = (1<<19)
+    SCALE = (1<<20)
+    UNUSED21 = (1<<21)
+    UNUSED22 = (1<<22)
+    EXTEND2 = (1<<23)
+
+    @property
+    def fitzquake_flags(cls):
+        return (cls.ALPHA | cls.FRAME2 | cls.MODEL2 | cls.LERPFINISH | cls.SCALE |
+                cls.UNUSED21 | cls.UNUSED22)
+
 
 class _ClientDataFlags(enum.IntFlag):
     VIEWHEIGHT = 1<<0
@@ -162,11 +210,43 @@ class _ClientDataFlags(enum.IntFlag):
     ARMOR = 1<<13
     WEAPON = 1<<14
 
+    # protocol 666 flags
+    EXTEND1 = 1<<15
+    WEAPON2 = 1<<16
+    ARMOR2 = 1<<17
+    AMMO2 = 1<<18
+    SHELLS2 = 1<<19
+    NAILS2 = 1<<20
+    ROCKETS2 = 1<<21
+    CELLS2 = 1<<22
+    EXTEND2 = 1<<23
+    WEAPONFRAME2 = 1<<24
+    WEAPONALPHA = 1<<25
+    UNUSED26 = 1<<26
+    UNUSED27 = 1<<27
+    UNUSED28 = 1<<28
+    UNUSED29 = 1<<29
+    UNUSED30 = 1<<30
+    EXTEND3 = 1<<31
+
+    @property
+    def fitzquake_flags(cls):
+        return (cls.EXTEND1 | cls.WEAPON2 | cls.ARMOR2 | cls.AMMO2 | cls.SHELLS2 | cls.NAILS2 |
+                cls.ROCKETS2 | cls.CELLS2 | cls.EXTEND2 | cls.WEAPONFRAME2 | cls.WEAPONALPHA |
+                cls.UNUSED26 | cls.UNUSED27 | cls.UNUSED28 | cls.UNUSED29 | cls.UNUSED30 |
+                cls.EXTEND3)
+
 
 class _SoundFlags(enum.IntFlag):
     VOLUME = (1<<0)
     ATTENUATION = (1<<1)
     LOOPING = (1<<2)
+
+
+class _BaselineBits(enum.IntFlag):
+    LARGEMODEL = (1<<0)
+    LARGEFRAME = (1<<1)
+    ALPHA = (1<<2)
 
 
 _MESSAGE_CLASSES = {}
@@ -180,6 +260,7 @@ _DEFAULT_SOUND_PACKET_VOLUME = 255
 
 
 class ServerMessage:
+    supported_protocols = set(Protocol)
     field_names = None
 
     def __init__(self, *args, **kwargs):
@@ -207,30 +288,48 @@ class ServerMessage:
         return m[:idx].decode('latin'), m[idx + 1:]
 
     @classmethod
-    def _parse_coord(cls, m):
-        (c,), m = cls._parse_struct("<h", m)
-        return c / 8., m
+    def _parse_angle(cls, m, protocol):
+        if protocol.flags & ProtocolFlags.FLOATANGLE:
+            (angle,), m = cls._parse_struct("<f", m)
+            angle = math.pi * angle / 180
+        elif protocol.flags & ProtocolFlags.SHORTANGLE:
+            (angle,), m = cls._parse_struct("<h", m)
+            angle = math.pi * angle / 32768
+        else:
+            angle, m = m[0], m[1:]
+            angle = angle * math.pi / 128.
+        return angle, m
 
     @classmethod
-    def _parse_angle(cls, m):
-        b, m = m[0], m[1:]
-        return b * math.pi / 128., m
+    def _parse_coord(cls, m, protocol):
+        if protocol.flags & ProtocolFlags.FLOATCOORD:
+            (coord,), m = cls._parse_struct("<f", m)
+        elif protocol.flags & ProtocolFlags.INT32COORD:
+            (coord,), m = cls._parse_struct("<i", m)
+            coord = coord / 16
+        elif protocol.flags & ProtocolFlags._24BITCOORD:
+            high, low = cls._parsestruct("<hB", m)
+            coord = x1 + x2 / 255
+        else:
+            (coord,), m = cls._parse_struct("<h", m)
+            coord = coord / 8
+        return coord, m
 
     @classmethod
-    def _parse_tuple(cls, n, el_parser, m):
+    def _parse_tuple(cls, n, el_parser, m, protocol):
         l = []
         for _ in range(n):
-            x, m = el_parser(m)
+            x, m = el_parser(m, protocol)
             l.append(x)
         return tuple(l), m
 
     @classmethod
-    def _parse_angles(cls, m):
-        return cls._parse_tuple(3, cls._parse_angle, m)
+    def _parse_angles(cls, m, protocol):
+        return cls._parse_tuple(3, cls._parse_angle, m, protocol)
 
     @classmethod
-    def _parse_coords(cls, m):
-        return cls._parse_tuple(3, cls._parse_coord, m)
+    def _parse_coords(cls, m, protocol):
+        return cls._parse_tuple(3, cls._parse_coord, m, protocol)
 
     @classmethod
     def _parse_optional(cls, bit, flags, fmt, m, post_func=None, default=None):
@@ -243,11 +342,11 @@ class ServerMessage:
             return default, m
 
     @classmethod
-    def parse_message(cls, m):
+    def parse_message(cls, m, protocol):
         msg_type_int = m[0]
 
         if msg_type_int & _UpdateFlags.SIGNAL:
-            return ServerMessageUpdate.parse(m)
+            return ServerMessageUpdate.parse(m, protocol)
 
         try:
             msg_type = ServerMessageType(msg_type_int)
@@ -258,16 +357,16 @@ class ServerMessage:
             msg_cls = _MESSAGE_CLASSES[msg_type]
         except KeyError:
             raise MalformedNetworkData("No handler for message type {}".format(msg_type))
-        return msg_cls.parse(m[1:])
+        return msg_cls.parse(m[1:], protocol)
         
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         raise NotImplementedError
 
 
 class StructServerMessage(ServerMessage):
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         vals, m = cls._parse_struct(cls.fmt, m)
         return cls(**dict(zip(cls.field_names, vals))), m
 
@@ -287,14 +386,25 @@ class ServerMessageUpdate(ServerMessage):
     )
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         flags, m = _UpdateFlags(m[0]), m[1:]
         assert flags & _UpdateFlags.SIGNAL
-
 
         if flags & _UpdateFlags.MOREBITS:
             more_flags, m = m[0], m[1:]
             flags |= (more_flags << 8)
+
+        if protocol.num != ProtocolNum.FITZQUAKE:
+            if flags & _UpdateFlags.EXTEND1:
+                extend1_flags, m = m[0], m[1:]
+                flags |= extend1_flags << 16
+            if flags & _UpdateFlags.EXTEND2:
+                extend1_flags, m = m[0], m[1:]
+                flags |= extend1_flags << 24
+        else:
+            fq_flags = flags & _UpdateFlags.fitzquake_flags
+            if fq_flags:
+                raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
 
         (entity_num,), m = cls._parse_struct("<H" if flags & _UpdateFlags.LONGENTITY else "<B", m)
         model_num, m = cls._parse_optional(_UpdateFlags.MODEL, flags, "<B", m)
@@ -314,6 +424,16 @@ class ServerMessageUpdate(ServerMessage):
         origin = (origin1, origin2, origin3)
         angle = (angle1, angle2, angle3)
 
+        if protocol.num == ProtocolNum.FITZQUAKE:
+            # TODO: Store alpha / scale / lerpfinish
+            alpha, m = cls._parse_optional(_UpdateFlags.ALPHA, flags, "<B", m)
+            scale, m = cls._parse_optional(_UpdateFlags.SCALE, flags, "<B", m)
+            frame_hi, m = cls._parse_optional(_UpdateFlags.FRAME2, flags, "<B", m, default=0)
+            frame = (frame_hi << 8) | (frame & 0xFF)
+            model_hi, m = cls._parse_optional(_UpdateFlags.MODEL2, flags, "<B", m, default=0)
+            model = (model_hi << 8) | (model & 0xFF)
+            lerp_finish, m = cls._parse_optional(_UpdateFlags.LERPFINISH, flags, "<B", m)
+
         step = bool(flags & _UpdateFlags.STEP)
 
         return cls(entity_num,
@@ -331,7 +451,7 @@ class NoFieldsServerMessage(ServerMessage):
     field_names = ()
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         return cls(), m
 
 
@@ -346,12 +466,30 @@ class ServerMessageFoundSecret(NoFieldsServerMessage):
 
 
 @_register_server_message
+class ServerMessageBonusFlash(NoFieldsServerMessage):
+    protocols = {Protocol.FITZQUAKE}
+    msg_type = ServerMessageType.BF
+
+
+@_register_server_message
+class ServerMessageFog(ServerMessage):
+    field_names = ('density', 'color', 'time')
+    protocols = {Protocol.FITZQUAKE}
+    msg_type = ServerMessageType.FOG
+
+    @classmethod
+    def parse(cls, m, protocol):
+        (density, r, g, b, time_short), m = cls._parse_struct("<BBBBH", m)
+        return cls(density, (r, g, b), time_short / 100.), m
+
+
+@_register_server_message
 class ServerMessagePrint(ServerMessage):
     field_names = ('string',)
     msg_type = ServerMessageType.PRINT
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         s, m = cls._parse_string(m)
         return cls(s), m
 
@@ -362,7 +500,7 @@ class ServerMessageCenterPrint(ServerMessage):
     msg_type = ServerMessageType.CENTERPRINT
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         s, m = cls._parse_string(m)
         return cls(s), m
 
@@ -373,7 +511,7 @@ class ServerMessageCutScene(ServerMessage):
     msg_type = ServerMessageType.CUTSCENE
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         s, m = cls._parse_string(m)
         return cls(s), m
 
@@ -384,22 +522,52 @@ class ServerMessageStuffText(ServerMessage):
     msg_type = ServerMessageType.STUFFTEXT
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         s, m = cls._parse_string(m)
         return cls(s), m
 
 
 @_register_server_message
-class ServerMessageSpawnStaticSound(ServerMessage):
-    field_names = ("origin", "sound_num", "vol", "atten")
-    msg_type = ServerMessageType.SPAWNSTATICSOUND
+class ServerMessageSkybox(ServerMessage):
+    protocols = {Protocol.FITZQUAKE}
+    name = ('string',)
+    msg_type = ServerMessageType.SKYBOX
 
     @classmethod
-    def parse(cls, m):
-        origin, m = cls._parse_coords(m)
+    def parse(cls, m, protocol):
+        s, m = cls._parse_string(m)
+        return cls(s), m
+
+
+class _SpawnStaticSoundBase(ServerMessage):
+    field_names = ("origin", "sound_num", "vol", "atten")
+
+    @classmethod
+    def _parse_generic(cls, m, protocol, version):
+        origin, m = cls._parse_coords(m, protocol)
+
+        fmt = "<HBB" if version == 2 else "<BBB"
         (sound_num, vol, atten), m = cls._parse_struct("<BBB", m)
 
         return cls(origin, sound_num, vol, atten), m
+
+
+@_register_server_message
+class ServerMessageSpawnStaticSound(ServerMessage):
+    msg_type = ServerMessageType.SPAWNSTATICSOUND
+
+    @classmethod
+    def parse(cls, m, protocol):
+        return cls._parse_generic(m, protocol, 1)
+
+
+@_register_server_message
+class ServerMessageSpawnStaticSound2(ServerMessage):
+    msg_type = ServerMessageType.SPAWNSTATICSOUND2
+
+    @classmethod
+    def parse(cls, m, protocol):
+        return cls._parse_generic(m, protocol, 2)
 
 
 @_register_server_message
@@ -429,21 +597,54 @@ class ServerMessageSetPause(StructServerMessage):
     field_names = ("paused",)
     msg_type = ServerMessageType.SETPAUSE
 
+
+class _SpawnBaselineBase(ServerMessage):
+    @classmethod
+    def _parse_generic(cls, m, protocol, include_entity_num, version):
+        if include_entity_num:
+            (entity_num,), m = cls._parse_struct("<H", m)
+
+        if version == 2:
+            (entity_num, bits), m = cls._parse_struct("<B", m)
+            fmt = (f"{'H' if bits & _BaselineBits.LARGEMODEL else 'B'}"
+                   f"{'H' if bits & _BaselineBits.LARGEFRAME else 'B'}"
+                   "BB")
+        else:
+            fmt = "<BBBB"
+
+        (model_num, frame, colormap, skin), m = cls._parse_struct("<HBBBB", m)
+        origin, angles = [], []
+        for _ in range(3):
+            o, m = cls._parse_coord(m, protocol)
+            a, m = cls._parse_angle(m, protocol)
+            origin.append(o)
+            angles.append(a)
+
+        if include_entity_num:
+            return cls(entity_num, model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
+        else:
+            return cls(model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
+
+
 @_register_server_message
-class ServerMessageSpawnBaseline(ServerMessage):
+class ServerMessageSpawnBaseline(_SpawnBaselineBase):
     field_names = ("entity_num", "model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNBASELINE
 
     @classmethod
-    def parse(cls, m):
-        (entity_num, model_num, frame, colormap, skin), m = cls._parse_struct("<HBBBB", m)
-        origin, angles = [], []
-        for _ in range(3):
-            o, m = cls._parse_coord(m)
-            a, m = cls._parse_angle(m)
-            origin.append(o)
-            angles.append(a)
-        return cls(entity_num, model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
+    def parse(cls, m, protocol):
+        return cls._parse_generic(m, protocol, True, 1)
+
+
+@_register_server_message
+class ServerMessageSpawnBaseline2(_SpawnBaselineBase):
+    protocols = {Protocol.FITZQUAKE}
+    field_names = ("entity_num", "model_num", "frame", "colormap", "skin", "origin", "angles")
+    msg_type = ServerMessageType.SPAWNBASELINE2
+
+    @classmethod
+    def parse(cls, m, protocol):
+        return cls._parse_generic(m, protocol, True, 2)
 
 
 @_register_server_message
@@ -452,15 +653,19 @@ class ServerMessageSpawnStatic(ServerMessage):
     msg_type = ServerMessageType.SPAWNSTATIC
 
     @classmethod
-    def parse(cls, m):
-        (model_num, frame, colormap, skin), m = cls._parse_struct("<BBBB", m)
-        origin, angles = [], []
-        for _ in range(3):
-            o, m = cls._parse_coord(m)
-            a, m = cls._parse_angle(m)
-            origin.append(o)
-            angles.append(a)
-        return cls(model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
+    def parse(cls, m, protocol):
+        return cls._parse_generic(m, protocol, False, 1)
+
+
+@_register_server_message
+class ServerMessageSpawnStatic2(ServerMessage):
+    protocols = {Protocol.FITZQUAKE}
+    field_names = ("model_num", "frame", "colormap", "skin", "origin", "angles")
+    msg_type = ServerMessageType.SPAWNSTATIC2
+
+    @classmethod
+    def parse(cls, m, protocol):
+        return cls._parse_generic(m, protocol, False, 2)
 
 
 @_register_server_message
@@ -476,7 +681,7 @@ class ServerMessageUpdateName(ServerMessage):
     field_names = ('client_num', 'name')
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         client_num, m = m[0], m[1:]
         name, m = cls._parse_string(m)
         return cls(client_num, name), m
@@ -502,7 +707,7 @@ class ServerMessageLightStyle(ServerMessage):
     msg_type = ServerMessageType.LIGHTSTYLE
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         index, m = m[0], m[1:]
         style, m = cls._parse_string(m)
         return cls(index, style), m
@@ -521,8 +726,8 @@ class ServerMessageSetAngle(ServerMessage):
     msg_type = ServerMessageType.SETANGLE
 
     @classmethod
-    def parse(cls, m):
-        view_angles, m = cls._parse_angles(m)
+    def parse(cls, m, protocol):
+        view_angles, m = cls._parse_angles(m, protocol)
         return cls(view_angles), m
 
 
@@ -542,7 +747,7 @@ class ServerMessageServerInfo(ServerMessage):
         return l, m
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         (protocol_version, max_clients, game_type), m = cls._parse_struct("<IBB", m)
         if protocol_version != 15:
             raise MalformedNetworkData("Invaid protocol version {}, only 15 is supported".format(protocol_version))
@@ -577,9 +782,21 @@ class ServerMessageClientData(ServerMessage):
     msg_type = ServerMessageType.CLIENTDATA
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         (flags_int,), m = cls._parse_struct("<H", m)
         flags = _ClientDataFlags(flags_int)
+
+        if protocol.num != ProtocolNum.FITZQUAKE:
+            if flags & _ClientDataFlags.EXTEND1:
+                extend1_flags, m = m[0], m[1:]
+                flags |= extend1_flags << 16
+            if flags & _ClientDataFlags.EXTEND2:
+                extend1_flags, m = m[0], m[1:]
+                flags |= extend1_flags << 24
+        else:
+            fq_flags = flags & _ClientDataFlags.fitzquake_flags
+            if fq_flags:
+                raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
 
         view_height, m = cls._parse_optional(_ClientDataFlags.VIEWHEIGHT, flags, "<B", m,
                                              default=_DEFAULT_VIEW_HEIGHT)
@@ -611,6 +828,27 @@ class ServerMessageClientData(ServerMessage):
         (health, ammo, shells, nails, rockets, cells, active_weapon), m = cls._parse_struct("<HBBBBBB", m)
         active_weapon = ItemFlags(active_weapon)
 
+        if protocol.num == ProtocolNum.FITZQUAKE:
+            weapon_hi, m = cls._parse_optional(_ClientDataFlags.WEAPON2, flags, "<B", m, default=0)
+            weapon |= weapon_hi << 8
+            armor_hi, m = cls._parse_optional(_ClientDataFlags.ARMOR2, flags, "<B", m, default=0)
+            armor |= armor_hi << 8
+            ammo_hi, m = cls._parse_optional(_ClientDataFlags.AMMO2, flags, "<B", m, default=0)
+            ammo |= ammo_hi << 8
+            shells_hi, m = cls._parse_optional(_ClientDataFlags.SHELLS2, flags, "<B", m, default=0)
+            shells |= shell_hi << 8
+            nails_hi, m = cls._parse_optional(_ClientDataFlags.NAILS2, flags, "<B", m, default=0)
+            nails |= nails_hi << 8
+            rockets_hi, m = cls._parse_optional(_ClientDataFlags.ROCKETS2, flags, "<B", m, default=0)
+            rockets |= rockets_hi << 8
+            cells_hi, m = cls._parse_optional(_ClientDataFlags.CELLS2, flags, "<B", m, default=0)
+            cells |= cells_hi << 8
+            weapon_frame_hi, m = cls._parse_optional(_ClientDataFlags.WEAPONFRAME2, flags, "<B", m, default=0)
+            weapon_frame |= weapon_frame_hi << 8
+
+            # TODO: Store weapon alpha
+            weapon_alpha, m = cls._parse_optional(_ClientDataFlags.WEAPONALPHA, flags, "<B", m)
+
         return cls(
             view_height,
             ideal_pitch,
@@ -638,7 +876,7 @@ class ServerMessageSound(ServerMessage):
     msg_type = ServerMessageType.SOUND
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         flags, m = _SoundFlags(m[0]), m[1:]
 
         volume, m = cls._parse_optional(_SoundFlags.VOLUME, flags, "<B", m,
@@ -651,7 +889,7 @@ class ServerMessageSound(ServerMessage):
         channel = t & 7
 
         sound_num, m = m[0], m[1:]
-        pos, m = cls._parse_coords(m)
+        pos, m = cls._parse_coords(m, protocol)
         
         return cls(volume, attenuation, entity_num, channel, sound_num, pos), m
 
@@ -662,8 +900,8 @@ class ServerMessageParticle(ServerMessage):
     msg_type = ServerMessageType.PARTICLE
 
     @classmethod
-    def parse(cls, m):
-        origin, m = cls._parse_coords(m)
+    def parse(cls, m, protocol):
+        origin, m = cls._parse_coords(m, protocol)
         
         direction, m = cls._parse_struct("<bbb", m)
         direction = tuple(x / 16. for x in direction)
@@ -683,16 +921,16 @@ class ServerMessageTempEntity(ServerMessage):
     msg_type = ServerMessageType.TEMP_ENTITY
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         temp_entity_type, m = TempEntityTypes(m[0]), m[1:]
 
         if temp_entity_type in (TempEntityTypes.LIGHTNING1, TempEntityTypes.LIGHTNING2, TempEntityTypes.LIGHTNING3,
                                 TempEntityTypes.BEAM):
             (entity_num,), m = cls._parse_struct("<H", m)
-            origin, m = cls._parse_coords(m)
-            end, m = cls._parse_coords(m)
+            origin, m = cls._parse_coords(m, protocol)
+            end, m = cls._parse_coords(m, protocol)
         else:
-            origin, m = cls._parse_coords(m)
+            origin, m = cls._parse_coords(m, protocol)
             end = None
             entity_num = None
 
@@ -720,7 +958,7 @@ class ServerMessageFinale(ServerMessage):
     msg_type = ServerMessageType.FINALE
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol):
         s, m = cls._parse_string(m)
         return cls(s), m
 
@@ -736,9 +974,9 @@ class ServerMessageDamage(ServerMessage):
     msg_type = ServerMessageType.DAMAGE
 
     @classmethod
-    def parse(cls, m):
+    def parse(cls, m, protocol, protocol):
         armor, blood, m = m[0], m[1], m[2:]
-        origin, m = cls._parse_coords(m)
+        origin, m = cls._parse_coords(m, protocol)
         return cls(armor, blood, origin), m
 
 
