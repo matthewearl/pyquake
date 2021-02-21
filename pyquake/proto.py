@@ -53,7 +53,7 @@ class ProtocolFlags(enum.IntFlag):
     MOREFLAGS = (1 << 31)
 
 
-class ProtocolNum(enum.IntEnum):
+class ProtocolVersion(enum.IntEnum):
     NETQUAKE = 15
     FITZQUAKE = 666
     RMQ = 999
@@ -61,7 +61,7 @@ class ProtocolNum(enum.IntEnum):
 
 @dataclasses.dataclass
 class Protocol:
-    num: ProtocolNum
+    version: ProtocolVersion
     flags: ProtocolFlags
 
 
@@ -260,7 +260,7 @@ _DEFAULT_SOUND_PACKET_VOLUME = 255
 
 
 class ServerMessage:
-    supported_protocols = set(Protocol)
+    protocols = set(ProtocolVersion)
     field_names = None
 
     def __init__(self, *args, **kwargs):
@@ -346,18 +346,28 @@ class ServerMessage:
         msg_type_int = m[0]
 
         if msg_type_int & _UpdateFlags.SIGNAL:
-            return ServerMessageUpdate.parse(m, protocol)
+            msg_cls = ServerMessageUpdate
+        else:
+            try:
+                msg_type = ServerMessageType(msg_type_int)
+            except ValueError:
+                raise MalformedNetworkData("Invalid message type {}".format(msg_type_int))
+            
+            try:
+                msg_cls = _MESSAGE_CLASSES[msg_type]
+            except KeyError:
+                raise MalformedNetworkData("No handler for message type {}".format(msg_type))
 
-        try:
-            msg_type = ServerMessageType(msg_type_int)
-        except ValueError:
-            raise MalformedNetworkData("Invalid message type {}".format(msg_type_int))
-        
-        try:
-            msg_cls = _MESSAGE_CLASSES[msg_type]
-        except KeyError:
-            raise MalformedNetworkData("No handler for message type {}".format(msg_type))
-        return msg_cls.parse(m[1:], protocol)
+            if protocol is not None and protocol.version not in msg_cls.protocols:
+                raise MalformedNetworkData(f"Received {msg_type} message but protocol is {protocol.version}")
+
+            m = m[1:]
+
+        if protocol is None and msg_cls.msg_type != ServerMessageType.SERVERINFO:
+            print(msg_cls, msg_type)
+            raise MalformedNetworkData(f"Server info message must be first, not {msg_cls.msg_type}")
+
+        return msg_cls.parse(m, protocol)
         
     @classmethod
     def parse(cls, m, protocol):
@@ -394,7 +404,7 @@ class ServerMessageUpdate(ServerMessage):
             more_flags, m = m[0], m[1:]
             flags |= (more_flags << 8)
 
-        if protocol.num != ProtocolNum.FITZQUAKE:
+        if protocol.version != ProtocolVersion.FITZQUAKE:
             if flags & _UpdateFlags.EXTEND1:
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 16
@@ -424,7 +434,7 @@ class ServerMessageUpdate(ServerMessage):
         origin = (origin1, origin2, origin3)
         angle = (angle1, angle2, angle3)
 
-        if protocol.num == ProtocolNum.FITZQUAKE:
+        if protocol.version == ProtocolVersion.FITZQUAKE:
             # TODO: Store alpha / scale / lerpfinish
             alpha, m = cls._parse_optional(_UpdateFlags.ALPHA, flags, "<B", m)
             scale, m = cls._parse_optional(_UpdateFlags.SCALE, flags, "<B", m)
@@ -467,14 +477,14 @@ class ServerMessageFoundSecret(NoFieldsServerMessage):
 
 @_register_server_message
 class ServerMessageBonusFlash(NoFieldsServerMessage):
-    protocols = {Protocol.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE}
     msg_type = ServerMessageType.BF
 
 
 @_register_server_message
 class ServerMessageFog(ServerMessage):
     field_names = ('density', 'color', 'time')
-    protocols = {Protocol.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE}
     msg_type = ServerMessageType.FOG
 
     @classmethod
@@ -529,7 +539,7 @@ class ServerMessageStuffText(ServerMessage):
 
 @_register_server_message
 class ServerMessageSkybox(ServerMessage):
-    protocols = {Protocol.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE}
     name = ('string',)
     msg_type = ServerMessageType.SKYBOX
 
@@ -638,7 +648,7 @@ class ServerMessageSpawnBaseline(_SpawnBaselineBase):
 
 @_register_server_message
 class ServerMessageSpawnBaseline2(_SpawnBaselineBase):
-    protocols = {Protocol.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE}
     field_names = ("entity_num", "model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNBASELINE2
 
@@ -659,7 +669,7 @@ class ServerMessageSpawnStatic(ServerMessage):
 
 @_register_server_message
 class ServerMessageSpawnStatic2(ServerMessage):
-    protocols = {Protocol.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE}
     field_names = ("model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNSTATIC2
 
@@ -733,7 +743,7 @@ class ServerMessageSetAngle(ServerMessage):
 
 @_register_server_message
 class ServerMessageServerInfo(ServerMessage):
-    field_names = ('protocol_version', 'max_clients', 'game_type', 'level_name', 'models', 'sounds')
+    field_names = ('protocol', 'max_clients', 'game_type', 'level_name', 'models', 'sounds')
     msg_type = ServerMessageType.SERVERINFO
 
     @classmethod
@@ -748,14 +758,23 @@ class ServerMessageServerInfo(ServerMessage):
 
     @classmethod
     def parse(cls, m, protocol):
-        (protocol_version, max_clients, game_type), m = cls._parse_struct("<IBB", m)
-        if protocol_version != 15:
-            raise MalformedNetworkData("Invaid protocol version {}, only 15 is supported".format(protocol_version))
+        (protocol_version,), m = cls._parse_struct("<I", m)
+        protocol_version = ProtocolVersion(protocol_version)
+
+        if protocol_version == ProtocolVersion.RMQ:
+            (protocol_flags,), m = cls._parse_struct("<I", m)
+            protocol_flags = ProtocolFlags(protocol_flags)
+        else:
+            protocol_flags = ProtocolFlags()
+
+        next_protocol = Protocol(protocol_version, protocol_flags)
+
+        (max_clients, game_type), m = cls._parse_struct("<BB", m)
         level_name, m = cls._parse_string(m)
         models, m = cls._parse_string_list(m)
         sounds, m = cls._parse_string_list(m)
 
-        return cls(protocol_version, max_clients, game_type, level_name, models, sounds), m
+        return cls(next_protocol, max_clients, game_type, level_name, models, sounds), m
 
 
 @_register_server_message
@@ -786,7 +805,7 @@ class ServerMessageClientData(ServerMessage):
         (flags_int,), m = cls._parse_struct("<H", m)
         flags = _ClientDataFlags(flags_int)
 
-        if protocol.num != ProtocolNum.FITZQUAKE:
+        if protocol.version != ProtocolVersion.FITZQUAKE:
             if flags & _ClientDataFlags.EXTEND1:
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 16
@@ -828,7 +847,7 @@ class ServerMessageClientData(ServerMessage):
         (health, ammo, shells, nails, rockets, cells, active_weapon), m = cls._parse_struct("<HBBBBBB", m)
         active_weapon = ItemFlags(active_weapon)
 
-        if protocol.num == ProtocolNum.FITZQUAKE:
+        if protocol.version == ProtocolVersion.FITZQUAKE:
             weapon_hi, m = cls._parse_optional(_ClientDataFlags.WEAPON2, flags, "<B", m, default=0)
             weapon |= weapon_hi << 8
             armor_hi, m = cls._parse_optional(_ClientDataFlags.ARMOR2, flags, "<B", m, default=0)
@@ -974,7 +993,7 @@ class ServerMessageDamage(ServerMessage):
     msg_type = ServerMessageType.DAMAGE
 
     @classmethod
-    def parse(cls, m, protocol, protocol):
+    def parse(cls, m, protocol):
         armor, blood, m = m[0], m[1], m[2:]
         origin, m = cls._parse_coords(m, protocol)
         return cls(armor, blood, origin), m
@@ -987,6 +1006,8 @@ def read_demo_file(f):
     demo_header_fmt = "<Ifff"
     demo_header_size = struct.calcsize(demo_header_fmt)
     
+    protocol = None
+
     while True:
         d = f.read(demo_header_size)
         if len(d) == 0:
@@ -996,7 +1017,9 @@ def read_demo_file(f):
         msg_len, *view_angles = struct.unpack(demo_header_fmt, d)
         msg = _read(f, msg_len)
         while msg:
-            parsed, msg = ServerMessage.parse_message(msg)
+            parsed, msg = ServerMessage.parse_message(msg, protocol)
+            if msg.msg_type == ServerMessageType.SERVERINFO: 
+                protocol = msg.protocol
             yield not bool(msg), view_angles, parsed
 
 
