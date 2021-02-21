@@ -352,7 +352,7 @@ class ServerMessage:
                 msg_type = ServerMessageType(msg_type_int)
             except ValueError:
                 raise MalformedNetworkData("Invalid message type {}".format(msg_type_int))
-            
+
             try:
                 msg_cls = _MESSAGE_CLASSES[msg_type]
             except KeyError:
@@ -363,12 +363,8 @@ class ServerMessage:
 
             m = m[1:]
 
-        if protocol is None and msg_cls.msg_type != ServerMessageType.SERVERINFO:
-            print(msg_cls, msg_type)
-            raise MalformedNetworkData(f"Server info message must be first, not {msg_cls.msg_type}")
-
         return msg_cls.parse(m, protocol)
-        
+
     @classmethod
     def parse(cls, m, protocol):
         raise NotImplementedError
@@ -563,7 +559,7 @@ class _SpawnStaticSoundBase(ServerMessage):
 
 
 @_register_server_message
-class ServerMessageSpawnStaticSound(ServerMessage):
+class ServerMessageSpawnStaticSound(_SpawnStaticSoundBase):
     msg_type = ServerMessageType.SPAWNSTATICSOUND
 
     @classmethod
@@ -572,7 +568,7 @@ class ServerMessageSpawnStaticSound(ServerMessage):
 
 
 @_register_server_message
-class ServerMessageSpawnStaticSound2(ServerMessage):
+class ServerMessageSpawnStaticSound2(_SpawnStaticSoundBase):
     msg_type = ServerMessageType.SPAWNSTATICSOUND2
 
     @classmethod
@@ -622,7 +618,7 @@ class _SpawnBaselineBase(ServerMessage):
         else:
             fmt = "<BBBB"
 
-        (model_num, frame, colormap, skin), m = cls._parse_struct("<HBBBB", m)
+        (model_num, frame, colormap, skin), m = cls._parse_struct(fmt, m)
         origin, angles = [], []
         for _ in range(3):
             o, m = cls._parse_coord(m, protocol)
@@ -658,7 +654,7 @@ class ServerMessageSpawnBaseline2(_SpawnBaselineBase):
 
 
 @_register_server_message
-class ServerMessageSpawnStatic(ServerMessage):
+class ServerMessageSpawnStatic(_SpawnBaselineBase):
     field_names = ("model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNSTATIC
 
@@ -668,7 +664,7 @@ class ServerMessageSpawnStatic(ServerMessage):
 
 
 @_register_server_message
-class ServerMessageSpawnStatic2(ServerMessage):
+class ServerMessageSpawnStatic2(_SpawnBaselineBase):
     protocols = {ProtocolVersion.FITZQUAKE}
     field_names = ("model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNSTATIC2
@@ -765,7 +761,7 @@ class ServerMessageServerInfo(ServerMessage):
             (protocol_flags,), m = cls._parse_struct("<I", m)
             protocol_flags = ProtocolFlags(protocol_flags)
         else:
-            protocol_flags = ProtocolFlags()
+            protocol_flags = ProtocolFlags(0)
 
         next_protocol = Protocol(protocol_version, protocol_flags)
 
@@ -1018,8 +1014,8 @@ def read_demo_file(f):
         msg = _read(f, msg_len)
         while msg:
             parsed, msg = ServerMessage.parse_message(msg, protocol)
-            if msg.msg_type == ServerMessageType.SERVERINFO: 
-                protocol = msg.protocol
+            if parsed.msg_type == ServerMessageType.SERVERINFO: 
+                protocol = parsed.protocol
             yield not bool(msg), view_angles, parsed
 
 
