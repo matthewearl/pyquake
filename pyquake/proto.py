@@ -412,7 +412,7 @@ class ServerMessageUpdate(ServerMessage):
             more_flags, m = m[0], m[1:]
             flags |= (more_flags << 8)
 
-        if protocol.version != ProtocolVersion.FITZQUAKE:
+        if protocol.version != ProtocolVersion.NETQUAKE:
             if flags & _UpdateFlags.EXTEND1:
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 16
@@ -563,7 +563,7 @@ class _SpawnStaticSoundBase(ServerMessage):
         origin, m = cls._parse_coords(m, protocol)
 
         fmt = "<HBB" if version == 2 else "<BBB"
-        (sound_num, vol, atten), m = cls._parse_struct("<BBB", m)
+        (sound_num, vol, atten), m = cls._parse_struct(fmt, m)
 
         return cls(origin, sound_num, vol, atten), m
 
@@ -621,11 +621,13 @@ class _SpawnBaselineBase(ServerMessage):
             (entity_num,), m = cls._parse_struct("<H", m)
 
         if version == 2:
-            (entity_num, bits), m = cls._parse_struct("<B", m)
+            (bits,), m = cls._parse_struct("<B", m)
+            bits = _BaselineBits(bits)
             fmt = (f"{'H' if bits & _BaselineBits.LARGEMODEL else 'B'}"
                    f"{'H' if bits & _BaselineBits.LARGEFRAME else 'B'}"
                    "BB")
         else:
+            bits = _BaselineBits(0)
             fmt = "<BBBB"
 
         (model_num, frame, colormap, skin), m = cls._parse_struct(fmt, m)
@@ -635,6 +637,10 @@ class _SpawnBaselineBase(ServerMessage):
             a, m = cls._parse_angle(m, protocol)
             origin.append(o)
             angles.append(a)
+
+        if bits & _BaselineBits.ALPHA:
+            # TODO: Store alpha
+            (alpha,), m = cls._parse_struct("<B", m)
 
         if include_entity_num:
             return cls(entity_num, model_num, frame, colormap, skin, tuple(origin), tuple(angles)), m
@@ -654,7 +660,7 @@ class ServerMessageSpawnBaseline(_SpawnBaselineBase):
 
 @_register_server_message
 class ServerMessageSpawnBaseline2(_SpawnBaselineBase):
-    protocols = {ProtocolVersion.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE, ProtocolVersion.RMQ}
     field_names = ("entity_num", "model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNBASELINE2
 
@@ -675,7 +681,7 @@ class ServerMessageSpawnStatic(_SpawnBaselineBase):
 
 @_register_server_message
 class ServerMessageSpawnStatic2(_SpawnBaselineBase):
-    protocols = {ProtocolVersion.FITZQUAKE}
+    protocols = {ProtocolVersion.FITZQUAKE, ProtocolVersion.RMQ}
     field_names = ("model_num", "frame", "colormap", "skin", "origin", "angles")
     msg_type = ServerMessageType.SPAWNSTATIC2
 
@@ -811,7 +817,7 @@ class ServerMessageClientData(ServerMessage):
         (flags_int,), m = cls._parse_struct("<H", m)
         flags = _ClientDataFlags(flags_int)
 
-        if protocol.version != ProtocolVersion.FITZQUAKE:
+        if protocol.version != ProtocolVersion.NETQUAKE:
             if flags & _ClientDataFlags.EXTEND1:
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 16
@@ -853,7 +859,7 @@ class ServerMessageClientData(ServerMessage):
         (health, ammo, shells, nails, rockets, cells, active_weapon), m = cls._parse_struct("<HBBBBBB", m)
         active_weapon = ItemFlags(active_weapon)
 
-        if protocol.version == ProtocolVersion.FITZQUAKE:
+        if protocol.version != ProtocolVersion.NETQUAKE:
             weapon_model_index, m = cls._parse_upper_byte(_ClientDataFlags.WEAPON2, flags, weapon_model_index, m)
             armor, m = cls._parse_upper_byte(_ClientDataFlags.ARMOR2, flags, armor, m)
             ammo, m = cls._parse_upper_byte(_ClientDataFlags.AMMO2, flags, ammo, m)
