@@ -187,7 +187,7 @@ class _UpdateFlags(enum.IntFlag):
     UNUSED22 = (1<<22)
     EXTEND2 = (1<<23)
 
-    @property
+    @classmethod
     def fitzquake_flags(cls):
         return (cls.ALPHA | cls.FRAME2 | cls.MODEL2 | cls.LERPFINISH | cls.SCALE |
                 cls.UNUSED21 | cls.UNUSED22)
@@ -229,7 +229,7 @@ class _ClientDataFlags(enum.IntFlag):
     UNUSED30 = 1<<30
     EXTEND3 = 1<<31
 
-    @property
+    @classmethod
     def fitzquake_flags(cls):
         return (cls.EXTEND1 | cls.WEAPON2 | cls.ARMOR2 | cls.AMMO2 | cls.SHELLS2 | cls.NAILS2 |
                 cls.ROCKETS2 | cls.CELLS2 | cls.EXTEND2 | cls.WEAPONFRAME2 | cls.WEAPONALPHA |
@@ -342,6 +342,18 @@ class ServerMessage:
             return default, m
 
     @classmethod
+    def _parse_upper_byte(cls, bit, flags, lower_byte, m):
+        upper_byte, m = cls._parse_optional(bit, flags, "<B", m)
+        if upper_byte is not None:
+            if lower_byte is None:
+                raise MalformedNetworkData(f'Lower byte present but upper byte not present')
+            assert (lower_byte & 0xff) == lower_byte
+            out = (upper_byte << 8) | lower_byte
+        else:
+            out = lower_byte
+        return out, m
+
+    @classmethod
     def parse_message(cls, m, protocol):
         msg_type_int = m[0]
 
@@ -408,7 +420,7 @@ class ServerMessageUpdate(ServerMessage):
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 24
         else:
-            fq_flags = flags & _UpdateFlags.fitzquake_flags
+            fq_flags = flags & _UpdateFlags.fitzquake_flags()
             if fq_flags:
                 raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
 
@@ -434,10 +446,8 @@ class ServerMessageUpdate(ServerMessage):
             # TODO: Store alpha / scale / lerpfinish
             alpha, m = cls._parse_optional(_UpdateFlags.ALPHA, flags, "<B", m)
             scale, m = cls._parse_optional(_UpdateFlags.SCALE, flags, "<B", m)
-            frame_hi, m = cls._parse_optional(_UpdateFlags.FRAME2, flags, "<B", m, default=0)
-            frame = (frame_hi << 8) | (frame & 0xFF)
-            model_hi, m = cls._parse_optional(_UpdateFlags.MODEL2, flags, "<B", m, default=0)
-            model = (model_hi << 8) | (model & 0xFF)
+            frame, m = cls._parse_upper_byte(_UpdateFlags.FRAME2, flags, frame, m)
+            model_num, m = cls._parse_upper_byte(_UpdateFlags.MODEL2, flags, model_num, m)
             lerp_finish, m = cls._parse_optional(_UpdateFlags.LERPFINISH, flags, "<B", m)
 
         step = bool(flags & _UpdateFlags.STEP)
@@ -809,7 +819,7 @@ class ServerMessageClientData(ServerMessage):
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 24
         else:
-            fq_flags = flags & _ClientDataFlags.fitzquake_flags
+            fq_flags = flags & _ClientDataFlags.fitzquake_flags()
             if fq_flags:
                 raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
 
@@ -844,22 +854,14 @@ class ServerMessageClientData(ServerMessage):
         active_weapon = ItemFlags(active_weapon)
 
         if protocol.version == ProtocolVersion.FITZQUAKE:
-            weapon_hi, m = cls._parse_optional(_ClientDataFlags.WEAPON2, flags, "<B", m, default=0)
-            weapon |= weapon_hi << 8
-            armor_hi, m = cls._parse_optional(_ClientDataFlags.ARMOR2, flags, "<B", m, default=0)
-            armor |= armor_hi << 8
-            ammo_hi, m = cls._parse_optional(_ClientDataFlags.AMMO2, flags, "<B", m, default=0)
-            ammo |= ammo_hi << 8
-            shells_hi, m = cls._parse_optional(_ClientDataFlags.SHELLS2, flags, "<B", m, default=0)
-            shells |= shell_hi << 8
-            nails_hi, m = cls._parse_optional(_ClientDataFlags.NAILS2, flags, "<B", m, default=0)
-            nails |= nails_hi << 8
-            rockets_hi, m = cls._parse_optional(_ClientDataFlags.ROCKETS2, flags, "<B", m, default=0)
-            rockets |= rockets_hi << 8
-            cells_hi, m = cls._parse_optional(_ClientDataFlags.CELLS2, flags, "<B", m, default=0)
-            cells |= cells_hi << 8
-            weapon_frame_hi, m = cls._parse_optional(_ClientDataFlags.WEAPONFRAME2, flags, "<B", m, default=0)
-            weapon_frame |= weapon_frame_hi << 8
+            weapon_model_index, m = cls._parse_upper_byte(_ClientDataFlags.WEAPON2, flags, weapon_model_index, m)
+            armor, m = cls._parse_upper_byte(_ClientDataFlags.ARMOR2, flags, armor, m)
+            ammo, m = cls._parse_upper_byte(_ClientDataFlags.AMMO2, flags, ammo, m)
+            shells, m = cls._parse_upper_byte(_ClientDataFlags.SHELLS2, flags, shells, m)
+            nails, m = cls._parse_upper_byte(_ClientDataFlags.NAILS2, flags, nails, m)
+            rockets, m = cls._parse_upper_byte(_ClientDataFlags.ROCKETS2, flags, rockets, m)
+            cells, m = cls._parse_upper_byte(_ClientDataFlags.CELLS2, flags, cells, m)
+            weapon_frame, m = cls._parse_upper_byte(_ClientDataFlags.WEAPONFRAME2, flags, weapon_frame, m)
 
             # TODO: Store weapon alpha
             weapon_alpha, m = cls._parse_optional(_ClientDataFlags.WEAPONALPHA, flags, "<B", m)
