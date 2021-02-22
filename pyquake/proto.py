@@ -427,8 +427,11 @@ class ServerMessageUpdate(ServerMessage):
         'step',
     )
 
+    _size_cache = {}
+    _msg_cache = {}
+
     @classmethod
-    def parse(cls, m, protocol):
+    def _parse_flags(cls, m, protocol):
         flags, m = _UpdateFlags(m[0]), m[1:]
         assert flags & _UpdateFlags.SIGNAL
 
@@ -448,6 +451,10 @@ class ServerMessageUpdate(ServerMessage):
             if fq_flags:
                 raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
 
+        return flags, m
+
+    @classmethod
+    def _parse_no_cache(cls, flags, m, protocol):
         (entity_num,), m = cls._parse_struct("<H" if flags & _UpdateFlags.LONGENTITY else "<B", m)
         model_num, m = cls._parse_optional(_UpdateFlags.MODEL, flags, "<B", m)
         frame, m = cls._parse_optional(_UpdateFlags.FRAME, flags, "<B", m)
@@ -485,7 +492,24 @@ class ServerMessageUpdate(ServerMessage):
                    effects,
                    origin,
                    angle,
-                   step), m
+                   step), m, flags
+
+    @classmethod
+    def parse(cls, m, protocol):
+        flags, m_after_flags = cls._parse_flags(m, protocol)
+
+        msg = None
+        size = cls._size_cache.get(flags)
+        if size is not None:
+            msg = cls._msg_cache.get(m[:size])
+
+        if msg is None:
+            msg, m_after, flags = cls._parse_no_cache(flags, m_after_flags, protocol)
+            size = len(m) - len(m_after)
+            cls._size_cache[flags] = size
+            cls._msg_cache[m[:size]] = msg
+
+        return msg, m[size:]
 
 
 class NoFieldsServerMessage(ServerMessage):
