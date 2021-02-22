@@ -242,6 +242,14 @@ class _SoundFlags(enum.IntFlag):
     ATTENUATION = (1<<1)
     LOOPING = (1<<2)
 
+    # protocol 666 flags
+    LARGEENTITY = (1<<3)
+    LARGESOUND = (1<<4)
+
+    @classmethod
+    def fitzquake_flags(cls):
+        return _SoundFlags.LARGEENTITY | _SoundFlags.LARGESOUND
+
 
 class _BaselineBits(enum.IntFlag):
     LARGEMODEL = (1<<0)
@@ -313,6 +321,22 @@ class ServerMessage:
         else:
             (coord,), m = cls._parse_struct("<h", m)
             coord = coord / 8
+        return coord, m
+
+    @classmethod
+    def _parse_angle_optional(cls, bit, flags, m, protocol):
+        if bit & flags:
+            angle, m = cls._parse_angle(m, protocol)
+        else:
+            angle = None
+        return angle, m
+
+    @classmethod
+    def _parse_coord_optional(cls, bit, flags, m, protocol):
+        if bit & flags:
+            coord, m = cls._parse_coord(m, protocol)
+        else:
+            coord = None
         return coord, m
 
     @classmethod
@@ -417,8 +441,8 @@ class ServerMessageUpdate(ServerMessage):
                 extend1_flags, m = m[0], m[1:]
                 flags |= extend1_flags << 16
             if flags & _UpdateFlags.EXTEND2:
-                extend1_flags, m = m[0], m[1:]
-                flags |= extend1_flags << 24
+                extend2_flags, m = m[0], m[1:]
+                flags |= extend2_flags << 24
         else:
             fq_flags = flags & _UpdateFlags.fitzquake_flags()
             if fq_flags:
@@ -433,16 +457,17 @@ class ServerMessageUpdate(ServerMessage):
 
         fix_coord = lambda c: c / 8.
         fix_angle = lambda a: a * math.pi / 128.
-        origin1, m = cls._parse_optional(_UpdateFlags.ORIGIN1, flags, "<h", m, fix_coord)
-        angle1, m = cls._parse_optional(_UpdateFlags.ANGLE1, flags, "<B", m, fix_angle)
-        origin2, m = cls._parse_optional(_UpdateFlags.ORIGIN2, flags, "<h", m, fix_coord)
-        angle2, m = cls._parse_optional(_UpdateFlags.ANGLE2, flags, "<B", m, fix_angle)
-        origin3, m = cls._parse_optional(_UpdateFlags.ORIGIN3, flags, "<h", m, fix_coord)
-        angle3, m = cls._parse_optional(_UpdateFlags.ANGLE3, flags, "<B", m, fix_angle)
+
+        origin1, m = cls._parse_coord_optional(_UpdateFlags.ORIGIN1, flags, m, protocol)
+        angle1, m = cls._parse_angle_optional(_UpdateFlags.ANGLE1, flags, m, protocol)
+        origin2, m = cls._parse_coord_optional(_UpdateFlags.ORIGIN2, flags, m, protocol)
+        angle2, m = cls._parse_angle_optional(_UpdateFlags.ANGLE2, flags, m, protocol)
+        origin3, m = cls._parse_coord_optional(_UpdateFlags.ORIGIN3, flags, m, protocol)
+        angle3, m = cls._parse_angle_optional(_UpdateFlags.ANGLE3, flags, m, protocol)
         origin = (origin1, origin2, origin3)
         angle = (angle1, angle2, angle3)
 
-        if protocol.version == ProtocolVersion.FITZQUAKE:
+        if protocol.version != ProtocolVersion.NETQUAKE:
             # TODO: Store alpha / scale / lerpfinish
             alpha, m = cls._parse_optional(_UpdateFlags.ALPHA, flags, "<B", m)
             scale, m = cls._parse_optional(_UpdateFlags.SCALE, flags, "<B", m)
@@ -907,13 +932,21 @@ class ServerMessageSound(ServerMessage):
         attenuation, m = cls._parse_optional(_SoundFlags.ATTENUATION, flags, "<B", m, lambda b: b / 64.,
                                              default=_DEFAULT_SOUND_PACKET_ATTENUATION)
 
-        (t,), m = cls._parse_struct("<H", m)
-        entity_num = t >> 3
-        channel = t & 7
+        if protocol.version == ProtocolVersion.NETQUAKE:
+            fq_flags = flags & _SoundFlags.fitzquake_flags()
+            if fq_flags:
+                raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
 
-        sound_num, m = m[0], m[1:]
+        if flags & _SoundFlags.LARGEENTITY:
+            (ent, channel), m = cls._parse_struct("<HB", m)
+        else:
+            (t,), m = cls._parse_struct("<H", m)
+            entity_num = t >> 3
+            channel = t & 7
+
+        sound_num, m = cls._parse_struct("<H" if flags & _SoundFlags.LARGESOUND else "<B", m)
         pos, m = cls._parse_coords(m, protocol)
-        
+
         return cls(volume, attenuation, entity_num, channel, sound_num, pos), m
 
 
