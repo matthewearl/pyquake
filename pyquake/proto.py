@@ -28,6 +28,7 @@ __all__ = (
 
 import dataclasses
 import enum
+import functools
 import inspect
 import math
 import os
@@ -274,10 +275,14 @@ class ServerMessage:
     protocols = set(ProtocolVersion)
     field_names = None
 
+    @classmethod
+    @functools.lru_cache(None)
+    def _get_sig(cls):
+        return inspect.Signature([inspect.Parameter(n, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                                  for n in cls.field_names])
+
     def __init__(self, *args, **kwargs):
-        sig = inspect.Signature([inspect.Parameter(n, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                                    for n in self.field_names])
-        bound_args = sig.bind(*args, **kwargs)
+        bound_args = self._get_sig().bind(*args, **kwargs)
         for key, val in bound_args.arguments.items():
             setattr(self, key, val)
 
