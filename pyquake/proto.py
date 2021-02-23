@@ -21,6 +21,8 @@
 __all__ = (
     'MalformedNetworkData',
     'ServerMessage',
+    'read_demo_file',
+    'clear_cache',
 )
 
 
@@ -28,6 +30,7 @@ import dataclasses
 import enum
 import inspect
 import math
+import os
 import struct
 
 
@@ -431,7 +434,35 @@ class ServerMessageUpdate(ServerMessage):
     _msg_cache = {}
 
     @classmethod
-    def _parse_flags(cls, m, protocol):
+    def clear_cache(cls):
+        cls._size_cache = {}
+        cls._msg_cache = {}
+
+    @classmethod
+    def _parse_flags_fast(cls, m, protocol):
+        """Parse out flags but for efficiency don't convert to enum types.
+
+        In addition test against numbers rather than enum values to avoid the extra lookups.
+        """
+        flags = m[0]
+        n = 1
+        if flags & 1: # MOREBITS
+            flags |= (m[n] << 8)
+            n += 1
+            if flags & (1 << 15):  # EXTEND1
+                flags |= m[n] << 16
+                n += 1
+                if flags & (1 << 23): # EXTEND2
+                    flags |= m[n] << 24
+                    n += 1
+        return flags, m[n:]
+
+    @classmethod
+    def _parse_flags_safe(cls, m, protocol):
+        """Like _parse_flags_fast but converts to enum type and does some checks.
+
+        Used when a cache miss occurs to check that _parse_flags_fast is returning the same value.
+        """
         flags, m = _UpdateFlags(m[0]), m[1:]
         assert flags & _UpdateFlags.SIGNAL
 
@@ -496,14 +527,16 @@ class ServerMessageUpdate(ServerMessage):
 
     @classmethod
     def parse(cls, m, protocol):
-        flags, m_after_flags = cls._parse_flags(m, protocol)
+        int_flags, m_after_flags = cls._parse_flags_fast(m, protocol)
 
         msg = None
-        size = cls._size_cache.get(flags)
+        size = cls._size_cache.get(int_flags)
         if size is not None:
             msg = cls._msg_cache.get(m[:size])
 
         if msg is None:
+            flags, _ = cls._parse_flags_safe(m, protocol)
+            assert flags == int_flags, f"{flags=} {int_flags=}"
             msg, m_after, flags = cls._parse_no_cache(flags, m_after_flags, protocol)
             size = len(m) - len(m_after)
             cls._size_cache[flags] = size
@@ -1084,9 +1117,28 @@ def read_demo_file(f):
             yield not bool(msg), view_angles, parsed
 
 
+def clear_cache():
+    """Some messages are cached for efficient parsing of repeated messages.
+
+    Call this function to free up memory used by this cache.
+    """
+
+    ServerMessageUpdate.clear_cache()
+
+
 def demo_parser_main():
-    import sys
-    with open(sys.argv[1], "rb") as f:
-        for msg in read_demo_file(f):
-            print(msg)
+    def f():
+        import sys
+        with open(sys.argv[1], "rb") as f:
+            for msg in read_demo_file(f):
+                if do_print:
+                    print(msg)
+
+    do_print = bool(int(os.environ.get('PYQ_PRINT', '1')))
+
+    if int(os.environ.get('PYQ_PROFILE', '0')):
+        import cProfile
+        cProfile.runctx('f()', globals(), locals(), 'stats')
+    else:
+        f()
 
