@@ -300,10 +300,11 @@ class ServerMessage:
 
     @classmethod
     def _parse_angle(cls, m, protocol):
-        if protocol.flags & ProtocolFlags.FLOATANGLE:
+        proto_flags = int(protocol.flags)
+        if proto_flags & int(ProtocolFlags.FLOATANGLE):
             (angle,), m = cls._parse_struct("<f", m)
             angle = math.pi * angle / 180
-        elif protocol.flags & ProtocolFlags.SHORTANGLE:
+        elif proto_flags & int(ProtocolFlags.SHORTANGLE):
             (angle,), m = cls._parse_struct("<h", m)
             angle = math.pi * angle / 32768
         else:
@@ -313,12 +314,13 @@ class ServerMessage:
 
     @classmethod
     def _parse_coord(cls, m, protocol):
-        if protocol.flags & ProtocolFlags.FLOATCOORD:
+        proto_flags = int(protocol.flags)
+        if proto_flags & int(ProtocolFlags.FLOATCOORD):
             (coord,), m = cls._parse_struct("<f", m)
-        elif protocol.flags & ProtocolFlags.INT32COORD:
+        elif proto_flags & int(ProtocolFlags.INT32COORD):
             (coord,), m = cls._parse_struct("<i", m)
             coord = coord / 16
-        elif protocol.flags & ProtocolFlags._24BITCOORD:
+        elif proto_flags & int(ProtocolFlags._24BITCOORD):
             high, low = cls._parsestruct("<hB", m)
             coord = x1 + x2 / 255
         else:
@@ -328,7 +330,7 @@ class ServerMessage:
 
     @classmethod
     def _parse_angle_optional(cls, bit, flags, m, protocol):
-        if bit & flags:
+        if int(bit) & int(flags):
             angle, m = cls._parse_angle(m, protocol)
         else:
             angle = None
@@ -336,7 +338,7 @@ class ServerMessage:
 
     @classmethod
     def _parse_coord_optional(cls, bit, flags, m, protocol):
-        if bit & flags:
+        if int(bit) & int(flags):
             coord, m = cls._parse_coord(m, protocol)
         else:
             coord = None
@@ -360,7 +362,7 @@ class ServerMessage:
 
     @classmethod
     def _parse_optional(cls, bit, flags, fmt, m, post_func=None, default=None):
-        if bit & flags:
+        if int(bit) & int(flags):
             (val,), m = cls._parse_struct(fmt, m)
             if post_func:
                 val = post_func(val)
@@ -384,7 +386,7 @@ class ServerMessage:
     def parse_message(cls, m, protocol):
         msg_type_int = m[0]
 
-        if msg_type_int & _UpdateFlags.SIGNAL:
+        if msg_type_int & int(_UpdateFlags.SIGNAL):
             msg_cls = ServerMessageUpdate
         else:
             try:
