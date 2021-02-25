@@ -34,6 +34,7 @@ import os
 import pathlib
 import struct
 import sys
+from typing import Optional
 
 
 logger = logging.getLogger(__name__)
@@ -91,10 +92,22 @@ def _read_entry(entry):
 class Filesystem(collections.abc.Mapping):
     """Interface to a .pak file based filesystem."""
 
-    def __init__(self, game_dir):
-        self._game_dir = pathlib.Path(game_dir).resolve()
+    def __init__(self, base_dir, game: Optional[str] = None):
+        base_dir = pathlib.Path(base_dir)
+        self._game_dirs = [(base_dir / "id1").resolve()]
 
-        pak_files = sorted(glob.glob(os.path.join(game_dir, "*.pak")))
+        for game_dir in self._game_dirs:
+            if game_dir.parent != base_dir:
+                raise Exception(f'Game dir {game_dir} is not in {base_dir}')
+
+        if game is not None:
+            self._game_dirs.append((pathlib.Path(base_dir) / game).resolve())
+
+        print(self._game_dirs)
+        pak_files = [pak_path
+                     for game_dir in self._game_dirs
+                     for pak_path in sorted(glob.glob(os.path.join(game_dir, "*.pak")))]
+        print(pak_files)
         self._index = {fname: entry for pak_file in pak_files for fname, entry in _generate_entries(pak_file)}
 
     def __getitem__(self, fname):
@@ -102,11 +115,12 @@ class Filesystem(collections.abc.Mapping):
             entry = self._index[fname]
             return _read_entry(entry)
         else:
-            file_path = (self._game_dir / fname).resolve()
-            if self._game_dir not in file_path.parents:
-                raise Exception(f'File path is not in game dir {file_path}')
-            with file_path.open('rb') as f:
-                return f.read()
+            for game_dir in reversed(self._game_dirs):
+                file_path = (game_dir / fname).resolve()
+                if game_dir not in file_path.parents:
+                    raise Exception(f'File path is not in game dir {file_path}')
+                with file_path.open('rb') as f:
+                    return f.read()
 
     def open(self, fname):
         return io.BytesIO(self[fname])
