@@ -1,5 +1,6 @@
 *Disclaimer*:  I work on this project in my own time, as such other projects
-might take priority.  Don't expect responses to issues or PRs.
+might take priority.  Don't expect responses to issues or PRs.  If you're
+interested in maintaining this project, I encourage you to make a fork.
 
 # PyQuake
 
@@ -14,4 +15,5 @@ Also the following entry points are provided:
 
 - `demo_viewer`:  View demo(s) in an OpenGL viewer.
 - `demo_parser`:  Parse demos into a human readable form.
+- `pyq_pak_extract`: View and extract pak files.
 
