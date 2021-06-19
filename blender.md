@@ -16,7 +16,6 @@ Python binary distributed with Blender:
 
 ```
 mkvirtualenv blendquake -p ~/blender-2.90.1-linux64/2.90/python/bin/python3.7m
-workon blendquake
 ```
 
 Once activated, checkout this repo, `cd` into it, and `pip install -e . -v` to
@@ -59,14 +58,14 @@ logging.getLogger().setLevel(logging.INFO)
 with open(expanduser('~/pyquake/config.json')) as f:
   config = json.load(f)
 
-# Directory containing id0.pak
-fs = pak.Filesystem(expanduser('~/.quakespasm/id1'))
+# Directory containing `id/`
+fs = pak.Filesystem(expanduser('~/.quakespasm/'))
 
 # Demo file to load
 demo_fname = expanduser('~/Downloads/e1m6_conny.dem')
 
 with open(demo_fname, 'rb') as demo_file:
-    world_obj = blenddemo.add_demo(demo_file, fs, config, fps=360)
+    world_obj, obj_mgr = blenddemo.add_demo(demo_file, fs, config, fps=360)
 
 world_obj.scale = (0.01,) * 3
 

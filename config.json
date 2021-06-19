@@ -1,7 +1,7 @@
 {
     "do_materials": true,
-    "use_lightmap": true,
-    "hide_view_entity": false,
+    "use_lightmap": false,
+    "hide_view_entity": true,
     "models": {
         "__default__": {
             "sample_as_light": false,

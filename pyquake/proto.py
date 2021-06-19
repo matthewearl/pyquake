@@ -543,7 +543,7 @@ class ServerMessageUpdate(ServerMessage):
 
         if msg is None:
             flags, _ = cls._parse_flags_safe(m, protocol)
-            assert flags == int_flags, f"{flags=} {int_flags=}"
+            assert flags == int_flags, f"flags={flags} int_flags={int_flags}"
             msg, m_after, flags = cls._parse_no_cache(flags, m_after_flags, protocol)
             size = len(m) - len(m_after)
             cls._size_cache[flags] = size
