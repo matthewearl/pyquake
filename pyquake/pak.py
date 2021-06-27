@@ -168,6 +168,7 @@ def pak_extract_main():
                 )
 
             print(f'extracting {rel_path!r} to {abs_path!r}')
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
             with open(abs_path, 'wb') as f:
                 f.write(_read_entry(entry))
 
