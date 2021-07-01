@@ -1,12 +1,18 @@
-# Demo to blender scene converter
+# Demo to Blender scene converter
 
-This repo contains utilities for converting Quake demo files (.dem) into blender
+This repo contains utilities for converting Quake demo files (.dem) into Blender
 scenes.  Tested with Blender 2.90.1.
+
+I wrote a [blog post](http://matthewearl.github.io/2021/06/20/quake-blender/)
+describing at a high level how this works.  Here's a video showing the output:
+
+[![Quake path traced in Blender](https://img.youtube.com/vi/uX0Ye7qhRd4/0.jpg)](https://www.youtube.com/watch?v=uX0Ye7qhRd4) 
+
 
 ## Setup
 
 Setup is complicated by the fact that we need to be able to import external
-libraries into blender's Python path. To do this you'll need a Python virtualenv
+libraries into Blender's Python path. To do this you'll need a Python virtualenv
 installed on your machine.  The Python binary that the virtualenv uses needs to
 be the same minor version as Blender's (ie. 3.7.x if using Blender 2.90.1).
 
@@ -51,7 +57,7 @@ importlib.reload(pyquake.blendbsp)
 importlib.reload(pyquake.blendmdl)
 blenddemo = importlib.reload(pyquake.blenddemo)
 
-# Log messages should appear on the terminal running blender
+# Log messages should appear on the terminal running Blender
 logging.getLogger().setLevel(logging.INFO)
 
 # Settings for setting texture brightnesses, etc.
