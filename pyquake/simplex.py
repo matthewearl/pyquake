@@ -215,3 +215,14 @@ class Simplex:
         for p in other.constraints:
             s = s.add_constraint(p)
         return s
+
+    def shrink(self, epsilon):
+        if epsilon < 0:
+            raise ValueError("epsilon must not be negative")
+        sx = self
+        for p in self.constraints:
+            new_p = p.copy()
+            new_p[-1] -= epsilon
+            sx = sx.add_constraint(new_p)
+        return sx.simplify()
+
