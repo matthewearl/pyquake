@@ -168,6 +168,7 @@ class Leaf(NamedTuple):
     @_listify
     def visible_leaves(self):
         i = self.vis_offset
+        # If i == -1 then return no visibility?
         visdata = self.bsp.visdata
         leaf_idx = 1
         while leaf_idx < self.bsp.models[0].num_leaves:
@@ -199,17 +200,25 @@ class Leaf(NamedTuple):
         return id(self) == id(other)
 
     @property
-    @functools.lru_cache(None)
-    def simplex(self):
+    def simplex_ancestry(self):
         model = self.bsp._leaf_to_model[self]
         path = self.bsp._leaf_to_path[self]
         node = model.node
         sx = simplex.Simplex.from_bbox(node.bbox.mins, node.bbox.maxs)
         for child_num in path:
+            sx = sx.simplify()
+            yield sx
             p = np.concatenate([node.plane.normal, [-node.plane.dist]])
             sx = sx.add_constraint(p if child_num == 0 else -p)
             node = node.get_child(child_num)
-        return sx
+        yield sx.simplify()
+
+    @property
+    @functools.lru_cache(None)
+    def simplex(self):
+        for sx in self.simplex_ancestry:
+            leaf_sx = sx
+        return leaf_sx
 
 
 class Face(NamedTuple):
@@ -662,7 +671,8 @@ class Bsp:
         entity_dir_entry = self._read_dir_entry(f, 0)
         f.seek(entity_dir_entry.offset)
         b = self._read(f, entity_dir_entry.size)
-        self.entities = ent.parse_entities(b[:b.index(b'\0')].decode('ascii'))
+        self.entities_string = b[:b.index(b'\0')].decode('ascii')
+        self.entities = ent.parse_entities(self.entities_string)
 
         logging.debug("Reading visdata")
         visinfo_dir_entry = self._read_dir_entry(f, 4)
