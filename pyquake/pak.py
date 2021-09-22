@@ -103,11 +103,9 @@ class Filesystem(collections.abc.Mapping):
         if game is not None:
             self._game_dirs.append((pathlib.Path(base_dir) / game).resolve())
 
-        print(self._game_dirs)
         pak_files = [pak_path
                      for game_dir in self._game_dirs
                      for pak_path in sorted(glob.glob(os.path.join(game_dir, "*.pak")))]
-        print(pak_files)
         self._index = {fname: entry for pak_file in pak_files for fname, entry in _generate_entries(pak_file)}
 
     def __getitem__(self, fname):
