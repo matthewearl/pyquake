@@ -139,6 +139,7 @@ def pak_extract_main():
     parser.add_argument('-x', '--extract', action='store_const',
                         const=True, default=False,
                         help='extract archive contents')
+    parser.add_argument('-f', '--file', required=False, help='extract a single file')
     parser.add_argument('pak_file_name', metavar='pak-file-name')
     parser.add_argument('target_dir', metavar='target-dir', nargs='?')
     parsed = parser.parse_args(sys.argv[1:])
@@ -158,7 +159,10 @@ def pak_extract_main():
     if parsed.extract:
         target_dir = os.getcwd() if parsed.target_dir is None else parsed.target_dir
         target_dir = os.path.join(target_dir, '')
+        target_dir = os.path.realpath(target_dir)
         for rel_path, entry in _generate_entries(parsed.pak_file_name):
+            if parsed.file is not None and rel_path != parsed.file:
+                continue
             abs_path = os.path.realpath(os.path.join(target_dir, rel_path))
             if os.path.commonprefix((abs_path, target_dir)) != target_dir:
                 raise Exception(
