@@ -22,12 +22,15 @@
 __all__ = (
     'MalformedWadFile',
     'read_wad',
+    'pic_from_lump_data',
 )
 
 
 import dataclasses
 import enum
 import struct
+
+import numpy as np
 
 
 class MalformedWadFile(Exception):
@@ -95,6 +98,14 @@ def read_wad(f):
     f.seek(wad_info.info_table_offset)
     lump_infos = [_LumpInfo.read(f) for _ in range(wad_info.num_lumps)]
     return {li.name: li.read_data(f) for li in lump_infos}
+
+
+def pic_from_lump_data(data, pal):
+    fmt = "<ll"
+    sz = struct.calcsize(fmt)
+    width, height = struct.unpack(fmt, data[:sz])
+
+    return pal[np.frombuffer(data[sz:], dtype=np.uint8).reshape((height, width))]
 
 
 if __name__ == "__main__":
