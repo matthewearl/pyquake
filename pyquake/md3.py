@@ -19,18 +19,33 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
+"""MD3 file parser"""
+
+
 __all__ = (
+    'Animation',
+    'MalformedAnimationError',
     'MalformedMD3Error',
     'MD3',
     'MD3Surface',
+    'PlayerAnimNumber',
 )
 
+import dataclasses
+import enum
+import re
 import struct
 
 import numpy as np
 
+from . import tokenize
+
 
 class MalformedMD3Error(Exception):
+    pass
+
+
+class MalformedAnimationError(Exception):
     pass
 
 
@@ -72,6 +87,21 @@ class MD3Surface:
 
         return verts, normals
 
+    def _read_tcs(self, f, offset, num_verts):
+        f.seek(offset)
+        return np.frombuffer(_read(f, 4 * 2 * num_verts), dtype=np.float32).reshape((num_verts, 2))
+
+    def _read_shaders(self, f, offset, num_shaders):
+        f.seek(offset)
+        shaders = {}
+
+        for _ in range(num_shaders):
+            name, index = _read_struct(f, '<64sl')
+            name = name[:name.index(b'\0')].decode('ascii')
+            shaders[index] = name
+
+        return shaders
+
     def __init__(self, f, offset):
         f.seek(offset)
         (self.ident, name, flags, self.num_frames, num_shaders, num_verts, num_triangles, triangles_offset,
@@ -80,6 +110,8 @@ class MD3Surface:
 
         self.tris = self._read_tris(f, offset + triangles_offset, num_triangles)
         self.verts, self.normals = self._read_verts(f, offset + vert_offset, num_verts)
+        self.tcs = self._read_tcs(f, offset + tc_offset, num_verts)
+        self.shaders = self._read_shaders(f, offset + shaders_offset, num_shaders)
 
 
 class MD3:
@@ -99,4 +131,106 @@ class MD3:
             surface = MD3Surface(f, surfaces_offset)
             surfaces_offset += surface.next_offset
             self.surfaces.append(surface)
+
+
+class PlayerAnimNumber(enum.IntEnum):
+    BOTH_DEATH1 = 0
+    BOTH_DEAD1 = enum.auto()
+    BOTH_DEATH2 = enum.auto()
+    BOTH_DEAD2 = enum.auto()
+    BOTH_DEATH3 = enum.auto()
+    BOTH_DEAD3 = enum.auto()
+
+    TORSO_GESTURE = enum.auto()
+
+    TORSO_ATTACK = enum.auto()
+    TORSO_ATTACK2 = enum.auto()
+
+    TORSO_DROP = enum.auto()
+    TORSO_RAISE = enum.auto()
+
+    TORSO_STAND = enum.auto()
+    TORSO_STAND2 = enum.auto()
+
+    LEGS_WALKCR = enum.auto()
+    LEGS_WALK = enum.auto()
+    LEGS_RUN = enum.auto()
+    LEGS_BACK = enum.auto()
+    LEGS_SWIM = enum.auto()
+
+    LEGS_JUMP = enum.auto()
+    LEGS_LAND = enum.auto()
+
+    LEGS_JUMPB = enum.auto()
+    LEGS_LANDB = enum.auto()
+
+    LEGS_IDLE = enum.auto()
+    LEGS_IDLECR = enum.auto()
+
+    LEGS_TURN = enum.auto()
+
+    TORSO_GETFLAG = enum.auto()
+    TORSO_GUARDBASE = enum.auto()
+    TORSO_PATROL = enum.auto()
+    TORSO_FOLLOWME = enum.auto()
+    TORSO_AFFIRMATIVE = enum.auto()
+    TORSO_NEGATIVE = enum.auto()
+
+    MAX_ANIMATIONS = enum.auto()
+
+    LEGS_BACKCR = enum.auto()
+    LEGS_BACKWALK = enum.auto()
+    FLAG_RUN = enum.auto()
+    FLAG_STAND = enum.auto()
+    FLAG_STAND2RUN = enum.auto()
+
+    MAX_TOTALANIMATIONS = enum.auto()
+
+
+@dataclasses.dataclass
+class Animation:
+    first_frame: int
+    num_frames: int
+    looping_frames: int
+    fps: int
+
+
+class AnimationInfo:
+    def _read_directives(self, token_iter):
+        try:
+            while token_iter.has(1) and not token_iter.peek(1).s[0].isdigit():
+                tok = next(token_iter).s
+                if tok == "footsteps":
+                    self.footsteps = next(token_iter).s
+                elif tok == "headoffset":
+                    self.head_offset = [float(next(token_iter).s) for _ in range(3)]
+                elif tok == "sex":
+                    self.sex = next(token_iter).s
+                elif tok == "fixedlegs":
+                    self.fixed_legs = True
+                elif tok == "fixedtorso":
+                    self.fixed_torso = True
+                else:
+                    raise MalformedMD3Errorj
+        except StopIteration:
+            raise MalformedAnimationError(f'Expected token on line {token_iter.line_num}')
+
+    def _read_anims(self, token_iter):
+        self.anims = []
+        while token_iter.has(4):
+            self.anims.append(Animation(
+                int(next(token_iter).s),
+                int(next(token_iter).s),
+                int(next(token_iter).s),
+                float(next(token_iter).s),
+            ))
+        if token_iter.has(1):
+            raise MalformedAnimationError('Extra token at end of file')
+
+    def __init__(self, f):
+        s = f.read().decode('ascii')
+
+        token_iter = tokenize.Tokenizer(s)
+        self._read_directives(token_iter)
+        self._read_anims(token_iter)
 
