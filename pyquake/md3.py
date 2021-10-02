@@ -29,6 +29,7 @@ __all__ = (
     'MD3',
     'MD3Surface',
     'PlayerAnimNumber',
+    'PmoveFrames',
 )
 
 import dataclasses
@@ -224,6 +225,16 @@ class AnimationInfo:
                 int(next(token_iter).s),
                 float(next(token_iter).s),
             ))
+
+        # adjust leg only frames, as per CG_ParseAnimationFile.
+        if len(self.anims) > PlayerAnimNumber.LEGS_WALKCR:
+            skip = (self.anims[PlayerAnimNumber.LEGS_WALKCR].first_frame
+                    - self.anims[PlayerAnimNumber.TORSO_GESTURE].first_frame)
+            for anim_num in range(PlayerAnimNumber.LEGS_WALKCR,
+                                  PlayerAnimNumber.TORSO_GETFLAG):
+                if anim_num < len(self.anims):
+                    self.anims[anim_num].first_frame -= skip
+
         if token_iter.has(1):
             raise MalformedAnimationError('Extra token at end of file')
 
@@ -233,4 +244,21 @@ class AnimationInfo:
         token_iter = tokenize.Tokenizer(s)
         self._read_directives(token_iter)
         self._read_anims(token_iter)
+
+
+@dataclasses.dataclass
+class PmoveFrames:
+    times: np.ndarray
+    anim_idxs: np.ndarray
+
+    @classmethod
+    def from_dump(cls, f):
+        lines = [line.strip().split(' ') for line in f.readlines() if ' torso ' in line]
+
+        times = np.array([int(words[0]) for words in lines]) * 1e-3
+        leg_anim_idxs = np.array([int(words[2]) for words in lines])
+        torso_anim_idxs = np.array([int(words[4]) for words in lines])
+
+        return cls(times, leg_anim_idxs), cls(times, torso_anim_idxs)
+
 
