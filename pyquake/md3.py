@@ -32,8 +32,10 @@ __all__ = (
     'PmoveFrames',
 )
 
+
 import dataclasses
 import enum
+import json
 import re
 import struct
 
@@ -249,16 +251,19 @@ class AnimationInfo:
 @dataclasses.dataclass
 class PmoveFrames:
     times: np.ndarray
-    anim_idxs: np.ndarray
+    leg_anim_idxs: np.ndarray
+    torso_anim_idxs: np.ndarray
+    origins: np.ndarray
 
     @classmethod
     def from_dump(cls, f):
-        lines = [line.strip().split(' ') for line in f.readlines() if ' torso ' in line]
+        """Parse a dump of leg and torso anims."""
+        records = [json.loads(line.strip().split(' ', 1)[1])
+                   for line in f.readlines() if line.startswith('@@@pmove_dump')]
 
-        times = np.array([int(words[0]) for words in lines]) * 1e-3
-        leg_anim_idxs = np.array([int(words[2]) for words in lines])
-        torso_anim_idxs = np.array([int(words[4]) for words in lines])
+        times = np.array([r['time'] for r in records]) * 1e-3
+        leg_anim_idxs = np.array([r['legs_anim'] for r in records])
+        torso_anim_idxs = np.array([r['torso_anim'] for r in records])
+        origins = np.array([r['origin'] for r in records])
 
-        return cls(times, leg_anim_idxs), cls(times, torso_anim_idxs)
-
-
+        return cls(times, leg_anim_idxs, torso_anim_idxs, origins)
