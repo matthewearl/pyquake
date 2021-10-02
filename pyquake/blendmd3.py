@@ -106,9 +106,16 @@ def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3,
 
     lower_obj = add_model(lower_md3, anim_info, pmove_frames.times, pmove_frames.leg_anim_idxs, 'lower', fps)
 
-    for time, origin in zip(pmove_frames.times, pmove_frames.origins):
+    for time, origin, angles in zip(pmove_frames.times,
+                                    pmove_frames.origins,
+                                    pmove_frames.angles):
+        blender_frame = int(fps * time)
         lower_obj.location = origin
-        lower_obj.keyframe_insert('location', frame=int(fps * time))
+        lower_obj.keyframe_insert('location', frame=blender_frame)
+
+        # TODO:  Take rotation logic from CG_PlayerAngles
+        lower_obj.rotation_euler = (0., 0., angles[1])
+        lower_obj.keyframe_insert('rotation_euler', frame=blender_frame)
 
     lower_obj.parent = root_obj
 

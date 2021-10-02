@@ -254,6 +254,7 @@ class PmoveFrames:
     leg_anim_idxs: np.ndarray
     torso_anim_idxs: np.ndarray
     origins: np.ndarray
+    angles: np.ndarray
 
     @classmethod
     def from_dump(cls, f):
@@ -265,5 +266,6 @@ class PmoveFrames:
         leg_anim_idxs = np.array([r['legs_anim'] for r in records])
         torso_anim_idxs = np.array([r['torso_anim'] for r in records])
         origins = np.array([r['origin'] for r in records])
+        angles = np.array([r['view_angle'] for r in records]) * np.pi / 180
 
-        return cls(times, leg_anim_idxs, torso_anim_idxs, origins)
+        return cls(times, leg_anim_idxs, torso_anim_idxs, origins, angles)
