@@ -118,6 +118,39 @@ class MD3Surface:
 
 
 class MD3:
+    def _decode_tag_name(self, file_tag):
+        b = bytes(file_tag['name'])
+        tag_name = b[:b.index(b'\0')].decode('ascii')
+        return tag_name
+
+    def _read_tags(self, f, offset, num_tags, num_frames):
+        f.seek(offset)
+        file_tag_dtype = np.dtype([('name', np.uint8, 64),
+                                   ('origin', np.float32, 3),
+                                   ('axis', np.float32, (3, 3))])
+        file_tags = (np.frombuffer(_read(f, file_tag_dtype.itemsize * num_tags * num_frames),
+                                    dtype=file_tag_dtype)
+                      .reshape((num_frames, num_tags)))
+
+        if len(file_tags) == 0:
+            tags_dict = {}
+        else:
+            tag_names = [self._decode_tag_name(file_tag) for file_tag in file_tags[0]]
+
+            tag_dtype = np.dtype([('origin', np.float32, 3),
+                                  ('axis', np.float32, (3, 3))])
+            tags_dict = {tag_name: np.zeros(num_frames, dtype=tag_dtype) for tag_name in tag_names}
+
+            for frame_idx in range(num_frames):
+                for tag_idx, tag_name in enumerate(tag_names):
+                    file_tag = file_tags[frame_idx, tag_idx]
+                    if self._decode_tag_name(file_tag) != tag_name:
+                        raise MalformedMD3Error('Unexpected tag name')
+                    tags_dict[tag_name][frame_idx]['origin'][:] = file_tag['origin']
+                    tags_dict[tag_name][frame_idx]['axis'][:] = file_tag['axis']
+
+        return tags_dict
+
     def __init__(self, f):
         (ident, version, name, flags, num_frames, num_tags, num_surfaces, num_skins, frames_offset, tags_offset,
          surfaces_offset, eof_offset) = _read_struct(f, "<4sl64slllllllll")
@@ -134,6 +167,8 @@ class MD3:
             surface = MD3Surface(f, surfaces_offset)
             surfaces_offset += surface.next_offset
             self.surfaces.append(surface)
+
+        self.tags = self._read_tags(f, tags_offset, num_tags, num_frames)
 
 
 class PlayerAnimNumber(enum.IntEnum):
@@ -214,7 +249,7 @@ class AnimationInfo:
                 elif tok == "fixedtorso":
                     self.fixed_torso = True
                 else:
-                    raise MalformedMD3Errorj
+                    raise MalformedMD3Error
         except StopIteration:
             raise MalformedAnimationError(f'Expected token on line {token_iter.line_num}')
 
