@@ -169,7 +169,7 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
     return obj, tag_objs
 
 
-def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3,
+def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3, weapon_md3: md3.MD3,
                pmove_frames: md3.PmoveFrames, anim_info: md3.AnimationInfo,
                fps: float,
                obj_name: str):
@@ -188,6 +188,10 @@ def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3,
     head_obj, head_tag_objs = add_model(head_md3, None, None, None,
                                         'head', 'tag_head', fps)
     head_obj.parent = upper_tag_objs['tag_head']
+
+    weapon_obj, weapon_tag_objs = add_model(weapon_md3, None, None, None,
+                                            'weapon', 'tag_weapon', fps)
+    weapon_obj.parent = upper_tag_objs['tag_weapon']
 
     for time, origin, angles in zip(pmove_frames.times,
                                     pmove_frames.origins,
