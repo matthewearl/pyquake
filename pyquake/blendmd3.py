@@ -4,7 +4,7 @@ __all__ = (
 
 
 import dataclasses
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import bpy
 import mathutils
@@ -20,27 +20,40 @@ def _create_shape_key(surf_obj, surf, frame_num):
     return shape_key
 
 
-def _quat_for_tag(tag):
+def _quat_from_axis(axis):
     q = mathutils.Quaternion([1, 0, 0], 0)
-    q.rotate(mathutils.Matrix(tag['axis']))
+    q.rotate(mathutils.Matrix(axis))
     return q
 
 
 def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
               times: np.ndarray, anim_idxs: np.ndarray,
-              obj_name: str, fps: float):
+              obj_name: str, origin_tag_name: Optional[str], fps: float):
     obj = bpy.data.objects.new(obj_name, None)
     bpy.context.scene.collection.objects.link(obj)
+
+    if origin_tag_name is not None:
+        # Set up an origin object, which applies the inverse transformation of a named tag.
+        origin_obj = bpy.data.objects.new(f'{obj_name}_origin', None)
+        bpy.context.scene.collection.objects.link(origin_obj)
+        origin_obj.parent = obj
+
+        origin_tag = m.tags[origin_tag_name][0]
+        origin_obj.rotation_quaternion = _quat_from_axis(origin_tag['axis'].T)
+        origin_obj.location = -origin_tag['axis'].T @ origin_tag['origin']
+        origin_obj.rotation_mode = 'QUATERNION'
+    else:
+        origin_obj = obj
 
     # Create an object for each tag.
     tag_objs = {}
     for tag_name, tags in m.tags.items():
         tag_obj = bpy.data.objects.new(f'{obj_name}_{tag_name}', None)
         bpy.context.scene.collection.objects.link(tag_obj)
-        tag_obj.rotation_quaternion = _quat_for_tag(tags[0])
+        tag_obj.rotation_quaternion = _quat_from_axis(tags[0]['axis'])
         tag_obj.location = tags[0]['origin']
         tag_obj.rotation_mode = 'QUATERNION'
-        tag_obj.parent = obj
+        tag_obj.parent = origin_obj
         tag_objs[tag_name] = tag_obj
 
     # Create shape keys.
@@ -59,7 +72,7 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
         surf_objs.append(surf_obj)
         bpy.context.scene.collection.objects.link(surf_obj)
 
-        surf_obj.parent = obj
+        surf_obj.parent = origin_obj
 
         for frame_num in range(surf.num_frames):
             shape_keys.append(_create_shape_key(surf_obj, surf, frame_num))
@@ -98,26 +111,32 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
         # Insert keyframes according to the animations.
         for anim_frame, anim_frame_time in zip(anim_frames, anim_frame_times):
             blender_frame = int(fps * anim_frame_time)
+
+            # Animate shape keys
             if prev_blender_frame is not None and prev_anim_frame != anim_frame:
                 shape_keys[anim_frame].value = 0
                 shape_keys[anim_frame].keyframe_insert('value', frame=prev_blender_frame)
-
                 shape_keys[prev_anim_frame].value = 0
                 shape_keys[prev_anim_frame].keyframe_insert('value', frame=blender_frame)
-
             shape_keys[anim_frame].value = 1
             shape_keys[anim_frame].keyframe_insert('value', frame=blender_frame)
-
             prev_anim_frame = anim_frame
             prev_blender_frame = blender_frame
 
+            # Animate tags
             for tag_name, tag_obj in tag_objs.items():
                 tag = m.tags[tag_name][anim_frame]
 
-                tag_obj.rotation_quaternion = _quat_for_tag(tag)
+                tag_obj.rotation_quaternion = _quat_from_axis(tag['axis'])
                 tag_obj.keyframe_insert('rotation_quaternion', frame=blender_frame)
                 tag_obj.location = tag['origin']
                 tag_obj.keyframe_insert('location', frame=blender_frame)
+
+            # Animate origin obj, if applicable
+            if origin_tag_name is not None:
+                origin_tag = m.tags[origin_tag_name][anim_frame]
+                origin_obj.rotation_quaternion = _quat_from_axis(origin_tag['axis'].T)
+                origin_obj.location = -origin_tag['axis'].T @ origin_tag['origin']
 
     # Make shape keys linearly interpolated.
     for surf_obj in surf_objs:
@@ -125,7 +144,7 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
             for kfp in c.keyframe_points:
                 kfp.interpolation = 'LINEAR'
 
-    return obj
+    return obj, tag_objs
 
 
 def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3,
@@ -136,11 +155,13 @@ def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3,
     root_obj = bpy.data.objects.new(obj_name, None)
     bpy.context.scene.collection.objects.link(root_obj)
 
-    lower_obj = add_model(lower_md3, anim_info, pmove_frames.times, pmove_frames.leg_anim_idxs, 'lower', fps)
-
-    upper_obj = bpy.data.objects.new(obj_name, None)
-    bpy.context.scene.collection.objects.link(upper_obj)
-    upper_obj.parent = lower_obj
+    lower_obj, lower_tag_objs = add_model(lower_md3, anim_info,
+                                          pmove_frames.times, pmove_frames.leg_anim_idxs,
+                                          'lower', None, fps)
+    upper_obj, upper_tag_objs = add_model(upper_md3, anim_info,
+                                          pmove_frames.times, pmove_frames.torso_anim_idxs,
+                                          'upper', 'tag_torso', fps)
+    upper_obj.parent = lower_tag_objs['tag_torso']
 
     for time, origin, angles in zip(pmove_frames.times,
                                     pmove_frames.origins,
