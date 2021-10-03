@@ -28,6 +28,7 @@ __all__ = (
     'MalformedMD3Error',
     'MD3',
     'MD3Surface',
+    'parse_skin_file',
     'PlayerAnimNumber',
     'PmoveFrames',
 )
@@ -304,3 +305,8 @@ class PmoveFrames:
         angles = np.array([r['view_angle'] for r in records]) * np.pi / 180
 
         return cls(times, leg_anim_idxs, torso_anim_idxs, origins, angles)
+
+
+def parse_skin_file(f):
+    return dict(l.decode().strip().split(',', 1) for l in f.readlines())
+

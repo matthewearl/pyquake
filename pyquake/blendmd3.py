@@ -1,16 +1,17 @@
 __all__ = (
     'add_model',
+    'add_player',
 )
 
 
 import dataclasses
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 
 import bpy
 import mathutils
 import numpy as np
 
-from . import md3
+from . import md3, pk3, blendshader
 
 
 def _create_shape_key(surf_obj, surf, frame_num):
@@ -119,8 +120,8 @@ def _animate_model(m: md3.MD3, origin_obj, surf_objs, tag_objs, anim_info: md3.A
                 kfp.interpolation = 'LINEAR'
 
 
-def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
-              times: np.ndarray, anim_idxs: np.ndarray,
+def add_model(m: md3.MD3, skin_ims: Dict[str, bpy.types.Image],
+              anim_info: md3.AnimationInfo, times: np.ndarray, anim_idxs: np.ndarray,
               obj_name: str, origin_tag_name: Optional[str], fps: float):
     obj = bpy.data.objects.new(obj_name, None)
     bpy.context.scene.collection.objects.link(obj)
@@ -152,6 +153,9 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
         bpy.context.scene.collection.objects.link(surf_obj)
         surf_obj.parent = origin_obj
 
+        mat = blendshader.setup_diffuse_material(skin_ims[surf.name], surf.name)
+        mesh.materials.append(mat)
+
     # Create an object for each tag.
     tag_objs = {}
     for tag_name, tags in m.tags.items():
@@ -169,27 +173,78 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
     return obj, tag_objs
 
 
-def add_player(lower_md3: md3.MD3, upper_md3: md3.MD3, head_md3: md3.MD3, weapon_md3: md3.MD3,
-               pmove_frames: md3.PmoveFrames, anim_info: md3.AnimationInfo,
-               fps: float,
-               obj_name: str):
+def _load_im(fs: pk3.Filesystem, shader: str):
+    dir_, base = shader.rsplit('/', 1)
+    if '.' in base:
+        pre_ext, ext = base.rsplit('.', 1)
+    else:
+        pre_ext, ext = base, None
+    pre_ext = f'{dir_}/{pre_ext}'
+
+    paths_to_try = []
+    if ext is not None:
+        paths_to_try.append(shader)
+        if shader != shader.lower():
+            paths_to_try.append(shader.lower())
+
+    for new_ext in ['jpg', 'tga']:
+        paths_to_try.append(f'{pre_ext}.{new_ext}')
+
+    for path in paths_to_try:
+        try:
+            with fs.open(path) as f:
+                im = blendshader.im_from_file(f, shader)
+        except FileNotFoundError as e:
+            pass
+        else:
+            break
+    else:
+        raise Exception(f'Could not find image for shader {shader}')
+
+    return im
+
+
+def _load_model_ims(fs: pk3.Filesystem, m: md3.MD3, skins: Dict[str, str]) -> Dict[str, bpy.types.Image]:
+    im_paths = {surf.name: surf.shaders[0] for surf in m.surfaces}
+    im_paths.update({surf_name: shader
+                     for surf_name, shader in skins.items() if surf_name in im_paths})
+    return {surf_name: _load_im(fs, shader) for surf_name, shader in im_paths.items()}
+
+
+def add_player(fs: pk3.Filesystem, model: str, skin: str, weapon: str,
+               pmove_frames: md3.PmoveFrames, fps: float, obj_name: str):
+    with fs.open(f'models/players/{model}/animation.cfg') as f:
+        anim_info = md3.AnimationInfo(f)
+
+    md3s = {}
+    skin_ims = {}
+    for section in ['lower', 'upper', 'head']:
+        with fs.open(f'models/players/{model}/{section}.md3') as f:
+            md3s[section] = md3.MD3(f)
+        with fs.open(f'models/players/{model}/{section}_{skin}.skin') as f:
+            skin_ims[section] = _load_model_ims(fs, md3s[section], md3.parse_skin_file(f))
+    with fs.open(f'models/weapons2/{weapon}/{weapon}.md3') as f:
+        weapon_md3 = md3.MD3(f)
 
     root_obj = bpy.data.objects.new(obj_name, None)
     bpy.context.scene.collection.objects.link(root_obj)
 
-    lower_obj, lower_tag_objs = add_model(lower_md3, anim_info,
-                                          pmove_frames.times, pmove_frames.leg_anim_idxs,
+    lower_obj, lower_tag_objs = add_model(md3s['lower'], skin_ims['lower'],
+                                          anim_info, pmove_frames.times, pmove_frames.leg_anim_idxs,
                                           'lower', None, fps)
-    upper_obj, upper_tag_objs = add_model(upper_md3, anim_info,
+    upper_obj, upper_tag_objs = add_model(md3s['upper'], skin_ims['upper'],
+                                          anim_info,
                                           pmove_frames.times, pmove_frames.torso_anim_idxs,
                                           'upper', 'tag_torso', fps)
     upper_obj.parent = lower_tag_objs['tag_torso']
 
-    head_obj, head_tag_objs = add_model(head_md3, None, None, None,
+    head_obj, head_tag_objs = add_model(md3s['head'], skin_ims['head'],
+                                        None, None, None,
                                         'head', 'tag_head', fps)
     head_obj.parent = upper_tag_objs['tag_head']
 
-    weapon_obj, weapon_tag_objs = add_model(weapon_md3, None, None, None,
+    weapon_obj, weapon_tag_objs = add_model(weapon_md3, _load_model_ims(fs, weapon_md3, {}),
+                                            None, None, None,
                                             'weapon', 'tag_weapon', fps)
     weapon_obj.parent = upper_tag_objs['tag_weapon']
 
