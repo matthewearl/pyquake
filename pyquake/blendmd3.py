@@ -20,9 +20,16 @@ def _create_shape_key(surf_obj, surf, frame_num):
     return shape_key
 
 
-def _quat_from_axis(axis):
+def _quat_from_axis(axis, prev_quat):
     q = mathutils.Quaternion([1, 0, 0], 0)
     q.rotate(mathutils.Matrix(axis))
+
+    # q and -q correspond with the same rotation, but flipping direction suddenly will lead to incorrect interpolation,
+    # since blender interpolates on the quaternion components.  Fix this here.
+    if prev_quat is not None:
+        if q.dot(prev_quat) < 0:
+            q = -q
+
     return q
 
 
@@ -39,7 +46,7 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
         origin_obj.parent = obj
 
         origin_tag = m.tags[origin_tag_name][0]
-        origin_obj.rotation_quaternion = _quat_from_axis(origin_tag['axis'].T)
+        origin_obj.rotation_quaternion = _quat_from_axis(origin_tag['axis'].T, None)
         origin_obj.location = -origin_tag['axis'].T @ origin_tag['origin']
         origin_obj.rotation_mode = 'QUATERNION'
     else:
@@ -50,7 +57,7 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
     for tag_name, tags in m.tags.items():
         tag_obj = bpy.data.objects.new(f'{obj_name}_{tag_name}', None)
         bpy.context.scene.collection.objects.link(tag_obj)
-        tag_obj.rotation_quaternion = _quat_from_axis(tags[0]['axis'])
+        tag_obj.rotation_quaternion = _quat_from_axis(tags[0]['axis'], None)
         tag_obj.location = tags[0]['origin']
         tag_obj.rotation_mode = 'QUATERNION'
         tag_obj.parent = origin_obj
@@ -127,7 +134,8 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
             for tag_name, tag_obj in tag_objs.items():
                 tag = m.tags[tag_name][anim_frame]
 
-                tag_obj.rotation_quaternion = _quat_from_axis(tag['axis'])
+                tag_obj.rotation_quaternion = _quat_from_axis(tag['axis'],
+                                                              tag_obj.rotation_quaternion)
                 tag_obj.keyframe_insert('rotation_quaternion', frame=blender_frame)
                 tag_obj.location = tag['origin']
                 tag_obj.keyframe_insert('location', frame=blender_frame)
@@ -135,7 +143,8 @@ def add_model(m: md3.MD3, anim_info: md3.AnimationInfo,
             # Animate origin obj, if applicable
             if origin_tag_name is not None:
                 origin_tag = m.tags[origin_tag_name][anim_frame]
-                origin_obj.rotation_quaternion = _quat_from_axis(origin_tag['axis'].T)
+                origin_obj.rotation_quaternion = _quat_from_axis(origin_tag['axis'].T,
+                                                                 origin_obj.rotation_quaternion)
                 origin_obj.location = -origin_tag['axis'].T @ origin_tag['origin']
 
     # Make shape keys linearly interpolated.
