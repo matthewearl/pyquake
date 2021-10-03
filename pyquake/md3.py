@@ -147,7 +147,7 @@ class MD3:
                     if self._decode_tag_name(file_tag) != tag_name:
                         raise MalformedMD3Error('Unexpected tag name')
                     tags_dict[tag_name][frame_idx]['origin'][:] = file_tag['origin']
-                    tags_dict[tag_name][frame_idx]['axis'][:] = file_tag['axis']
+                    tags_dict[tag_name][frame_idx]['axis'][:] = file_tag['axis'].T
 
         return tags_dict
 
