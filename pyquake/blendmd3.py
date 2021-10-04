@@ -7,6 +7,7 @@ __all__ = (
 import dataclasses
 from typing import List, Tuple, Optional, Dict
 
+import bmesh
 import bpy
 import mathutils
 import numpy as np
@@ -120,6 +121,20 @@ def _animate_model(m: md3.MD3, origin_obj, surf_objs, tag_objs, anim_info: md3.A
                 kfp.interpolation = 'LINEAR'
 
 
+def _set_surf_tcs(mesh, tris, tcs):
+    mesh.uv_layers.new()
+
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    uv_layer = bm.loops.layers.uv[0]
+
+    for bm_face, tri in zip(bm.faces, tris):
+        for bm_loop, vert_idx in zip(bm_face.loops, tri):
+            bm_loop[uv_layer].uv = tcs[vert_idx]
+
+    bm.to_mesh(mesh)
+
+
 def add_model(m: md3.MD3, skin_ims: Dict[str, bpy.types.Image],
               anim_info: md3.AnimationInfo, times: np.ndarray, anim_idxs: np.ndarray,
               obj_name: str, origin_tag_name: Optional[str], fps: float):
@@ -155,6 +170,8 @@ def add_model(m: md3.MD3, skin_ims: Dict[str, bpy.types.Image],
 
         mat = blendshader.setup_diffuse_material(skin_ims[surf.name], surf.name)
         mesh.materials.append(mat)
+
+        _set_surf_tcs(mesh, surf.tris, surf.tcs)
 
     # Create an object for each tag.
     tag_objs = {}
