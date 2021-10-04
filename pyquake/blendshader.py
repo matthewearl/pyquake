@@ -65,7 +65,7 @@ def setup_diffuse_material(im: bpy.types.Image, mat_name: str):
 
     texture_node = nodes.new('ShaderNodeTexImage')
     texture_node.image = im
-    texture_node.interpolation = 'Closest'
+    texture_node.interpolation = 'Linear'
     links.new(diffuse_node.inputs['Color'], texture_node.outputs['Color'])
 
     return mat
