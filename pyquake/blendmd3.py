@@ -5,6 +5,7 @@ __all__ = (
 
 
 import dataclasses
+import logging
 from typing import List, Tuple, Optional, Dict
 
 import bmesh
@@ -13,6 +14,9 @@ import mathutils
 import numpy as np
 
 from . import md3, pk3, blendshader
+
+
+logger = logging.getLogger(__name__)
 
 
 def _create_shape_key(surf_obj, surf, frame_num):
@@ -58,6 +62,7 @@ def _animate_model(m: md3.MD3, origin_obj, surf_objs, tag_objs, anim_info: md3.A
     prev_anim_frame = None
     prev_blender_frame = None
     for anim_idx, start_time, end_time in zip(changed_anim_idxs, start_times, end_times):
+        logger.debug('anim_idx=%s start_idx=%s end_time=%s', anim_idx, start_time, end_time)
         # This bit is flipped to force an anim restart, but it should otherwise be ignored.
         anim_idx &= ~128
 
@@ -65,8 +70,11 @@ def _animate_model(m: md3.MD3, origin_obj, surf_objs, tag_objs, anim_info: md3.A
         end_frame = int(end_time * fps)
 
         # Work out which frames should be played during this period.
+        # TODO: rounding up to get `num_anim_frames` results in some short keyframes and therefore some jerky
+        # transitions.  However, rounding down we can miss short animations entirely.  Perhaps max(1, round(.)) rather
+        # than ceil(.)?  What does the game do?
         anim = anim_info.anims[anim_idx]
-        num_anim_frames = int(anim.fps * (end_time - start_time))
+        num_anim_frames = int(np.ceil(anim.fps * (end_time - start_time)))
         anim_frames = np.arange(num_anim_frames)
         if anim.looping_frames:
             anim_frames[anim.num_frames:] = (
@@ -87,6 +95,7 @@ def _animate_model(m: md3.MD3, origin_obj, surf_objs, tag_objs, anim_info: md3.A
         # Insert keyframes according to the animations.
         for anim_frame, anim_frame_time in zip(anim_frames, anim_frame_times):
             blender_frame = int(fps * anim_frame_time)
+            logger.debug('blender_frame=%s anim_idx=%s anim_frame=%s', blender_frame, anim_idx, anim_frame)
 
             # Animate shape keys
             if prev_blender_frame is not None and prev_anim_frame != anim_frame:
@@ -185,6 +194,7 @@ def add_model(m: md3.MD3, skin_ims: Dict[str, bpy.types.Image],
         tag_objs[tag_name] = tag_obj
 
     if anim_info is not None:
+        logger.debug('obj_name=%s', obj_name)
         _animate_model(m, origin_obj, surf_objs, tag_objs, anim_info, times, anim_idxs, origin_tag_name, fps)
 
     return obj, tag_objs
