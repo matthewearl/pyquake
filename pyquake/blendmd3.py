@@ -248,21 +248,21 @@ def add_player(fs: pk3.Filesystem, model: str, skin: str, weapon: str,
 
     lower_obj, lower_tag_objs = add_model(md3s['lower'], skin_ims['lower'],
                                           anim_info, pmove_frames.times, pmove_frames.leg_anim_idxs,
-                                          'lower', None, fps)
+                                          f'{obj_name}_lower', None, fps)
     upper_obj, upper_tag_objs = add_model(md3s['upper'], skin_ims['upper'],
                                           anim_info,
                                           pmove_frames.times, pmove_frames.torso_anim_idxs,
-                                          'upper', 'tag_torso', fps)
+                                          f'{obj_name}_upper', 'tag_torso', fps)
     upper_obj.parent = lower_tag_objs['tag_torso']
 
     head_obj, head_tag_objs = add_model(md3s['head'], skin_ims['head'],
                                         None, None, None,
-                                        'head', 'tag_head', fps)
+                                        f'{obj_name}_head', 'tag_head', fps)
     head_obj.parent = upper_tag_objs['tag_head']
 
     weapon_obj, weapon_tag_objs = add_model(weapon_md3, _load_model_ims(fs, weapon_md3, {}),
                                             None, None, None,
-                                            'weapon', 'tag_weapon', fps)
+                                            f'{obj_name}_weapon', 'tag_weapon', fps)
     weapon_obj.parent = upper_tag_objs['tag_weapon']
 
     for time, origin, angles in zip(pmove_frames.times,
