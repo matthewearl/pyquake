@@ -177,8 +177,9 @@ def add_model(m: md3.MD3, skin_ims: Dict[str, bpy.types.Image],
         bpy.context.scene.collection.objects.link(surf_obj)
         surf_obj.parent = origin_obj
 
-        mat = blendshader.setup_diffuse_material(skin_ims[surf.name], surf.name)
-        mesh.materials.append(mat)
+        if skin_ims[surf.name] is not None:
+            mat = blendshader.setup_diffuse_material(skin_ims[surf.name], surf.name)
+            mesh.materials.append(mat)
 
         _set_surf_tcs(mesh, surf.tris, surf.tcs)
 
@@ -226,7 +227,8 @@ def _load_im(fs: pk3.Filesystem, shader: str):
         else:
             break
     else:
-        raise Exception(f'Could not find image for shader {shader}')
+        return None
+        #raise FileNotFoundError(f'Could not find image for shader {shader}')
 
     return im
 
@@ -288,5 +290,5 @@ def add_player(fs: pk3.Filesystem, model: str, skin: str, weapon: str,
 
     lower_obj.parent = root_obj
 
-    return root_obj
+    return root_obj, lower_obj
 
