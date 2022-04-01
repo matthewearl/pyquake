@@ -239,6 +239,10 @@ class Face(NamedTuple):
             yield v
 
     @property
+    def edge_indices(self):
+        return self.bsp.edge_list[self.edge_list_idx:self.edge_list_idx + self.num_edges]
+
+    @property
     def vertices(self):
         return (self.bsp.vertices[idx] for idx in self.vert_indices)
 
@@ -400,6 +404,13 @@ class Model(NamedTuple):
     @property
     def faces(self):
         return self.bsp.faces[self.first_face_idx:self.first_face_idx + self.num_faces]
+
+    @property
+    def edges(self):
+        edge_indices = {
+            abs(edge_idx) for face in self.faces for edge_idx in face.edge_indices
+        }
+        return (self.bsp.edges[edge_idx] for edge_idx in edge_indices)
 
     @property
     def node(self):
