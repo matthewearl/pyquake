@@ -205,17 +205,25 @@ class Leaf(NamedTuple):
         return id(self) == id(other)
 
     @property
-    def simplex_ancestry(self):
+    def node_ancestry(self):
         model = self.bsp._leaf_to_model[self]
         path = self.bsp._leaf_to_path[self]
         node = model.node
-        sx = simplex.Simplex.from_bbox(node.bbox.mins, node.bbox.maxs)
         for child_num in path:
+            yield node, child_num
+            node = node.get_child(child_num)
+
+    @property
+    def simplex_ancestry(self):
+        sx = None
+        for node, child_num in self.node_ancestry:
+            if sx is None:
+                sx = simplex.Simplex.from_bbox(node.bbox.mins, node.bbox.maxs)
             sx = sx.simplify()
             yield sx
             p = np.concatenate([node.plane.normal, [-node.plane.dist]])
             sx = sx.add_constraint(p if child_num == 0 else -p)
-            node = node.get_child(child_num)
+
         yield sx.simplify()
 
     @property
