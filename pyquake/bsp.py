@@ -149,6 +149,11 @@ class Node(NamedTuple):
                 for leaf, path in child_node._generate_leaf_paths():
                     yield leaf, [child_num] + path
 
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.nodes.index(self)
+
 
 class Leaf(NamedTuple):
     bsp: "Bsp"
