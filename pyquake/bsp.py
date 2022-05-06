@@ -98,6 +98,9 @@ class Node(NamedTuple):
     def plane(self):
         return self.bsp.planes[self.plane_id]
 
+    def child_is_solid(self, child_num):
+        return self.child_ids[child_num] == -1
+
     def child_is_leaf(self, child_num):
         return self.child_ids[child_num] < 0
 
