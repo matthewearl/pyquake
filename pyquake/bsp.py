@@ -49,6 +49,10 @@ class LightmapTooSmall(Exception):
     pass
 
 
+class ChildIsLeaf(Exception):
+    pass
+
+
 def _listify(f):
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
@@ -84,6 +88,29 @@ class Plane(NamedTuple):
 class BBox(NamedTuple):
     mins: Tuple[int, int, int]
     maxs: Tuple[int, int, int]
+
+
+# TODO: Share code with `Node`?
+class ClipNode(NamedTuple):
+    bsp: "Bsp"
+    plane_id: int
+    child_ids: Tuple[int, int]
+
+    @property
+    def plane(self):
+        return self.bsp.planes[self.plane_id]
+
+    def child_is_solid(self, child_num):
+        return self.child_ids[child_num] == -1
+
+    def child_is_leaf(self, child_num):
+        return self.child_ids[child_num] < 0
+
+    def get_child(self, child_num):
+        if self.child_is_leaf(child_num):
+            raise ChildIsLeaf('get_child can only be called for non-leaf children')
+        return self.bsp.clip_nodes[self.child_ids[child_num]]
+
 
 
 class Node(NamedTuple):
@@ -416,6 +443,7 @@ class Model(NamedTuple):
     num_faces: int
     num_leaves: int
     node_id: int
+    clip_node_ids: Tuple[int]
 
     @property
     def faces(self):
@@ -431,6 +459,30 @@ class Model(NamedTuple):
     @property
     def node(self):
         return self.bsp.nodes[self.node_id]
+
+    def get_clip_node(self, hull_id: int) -> ClipNode:
+        """Get the root clip node for a particular hull of this model.
+
+        Hull 0 corresponds with the main BSP tree used for visibility culling,
+        whose planes coincide with rendered faces. It is used for collisions
+        with point-like entities.  Hulls 1 and 2 are expanded versions of hull
+        0, formed by taking the Minkowsi difference with some bboxes:
+         - hull 1: ((-16, -16, -32), (16, 16, 24))  (the player bbox)
+         - hull 2: ((-32, -32, -64), (32, 32, 24))
+
+        These are used for collisions with objects with the corresponding bbox.
+        Hull 3 seems to be unused.
+
+        Arguments:
+            hull_id:  The hull id of the clip node to be returned.  For hull 0
+            use `Model.node`.
+
+        Returns:
+            The root clip node.
+        """
+        if hull_id == 0:
+            raise ValueError('For the point hull use Model.node')
+        return self.bsp.clip_nodes[self.clip_node_ids[hull_id - 1]]
 
     def get_simplex_from_point(self, point):
         sx = simplex.Simplex.from_bbox(self.node.bbox.mins, self.node.bbox.maxs)
@@ -652,7 +704,7 @@ class Bsp:
         logging.debug("Reading models")
         def read_model(mins1, mins2, mins3, maxs1, maxs2, maxs3, o1, o2, o3, n1, n2, n3, n4, num_leaves, first_face_idx,
                        num_faces):
-            return Model(self, first_face_idx, num_faces, num_leaves, n1)
+            return Model(self, first_face_idx, num_faces, num_leaves, n1, (n2, n3, n4))
         self.models = self._read_lump(f, self._read_dir_entry(f, 14), "<ffffffffflllllll", read_model)
 
         logging.debug("Reading textures")
@@ -670,6 +722,15 @@ class Bsp:
         elif version == BspVersion.BSP2:
             node_fmt = "<lllffffffLL"
         self.nodes = self._read_lump(f, self._read_dir_entry(f, 5), node_fmt, read_node)
+
+        logging.debug("Reading clip nodes")
+        def read_clip_node(plane_id, c1, c2):
+            return ClipNode(self, plane_id, (c1, c2))
+        if version.uses_longs:
+            clip_node_fmt = "<lll"
+        else:
+            clip_node_fmt = "<lhh"
+        self.clip_nodes = self._read_lump(f, self._read_dir_entry(f, 9), clip_node_fmt, read_clip_node)
 
         logging.debug("Reading leaves")
         def read_leaf(contents, vis_offset, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_list_idx, num_faces, l1, l2,
@@ -708,13 +769,12 @@ class Bsp:
         self.visdata = b
 
 
-
 if __name__ == "__main__":
     import io
     import sys
     import logging
 
-    import pak
+    from . import pak
 
     root_logger = logging.getLogger()
     root_logger.addHandler(logging.StreamHandler())
