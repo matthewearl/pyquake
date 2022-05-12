@@ -111,6 +111,16 @@ class ClipNode(NamedTuple):
             raise ChildIsLeaf('get_child can only be called for non-leaf children')
         return self.bsp.clip_nodes[self.child_ids[child_num]]
 
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.clip_nodes.index(self)
+
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return id(self) == id(other)
 
 
 class Node(NamedTuple):

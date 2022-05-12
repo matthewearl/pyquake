@@ -1106,7 +1106,7 @@ def read_demo_file(f):
 
     demo_header_fmt = "<Ifff"
     demo_header_size = struct.calcsize(demo_header_fmt)
-    
+
     protocol = None
 
     while True:
