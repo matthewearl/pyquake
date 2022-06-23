@@ -1,7 +1,7 @@
 # Demo to Blender scene converter
 
 This repo contains utilities for converting Quake demo files (.dem) into Blender
-scenes.  Tested with Blender 2.90.1.
+scenes.  Tested with Blender 3.2.0
 
 I wrote a [blog post](http://matthewearl.github.io/2021/06/20/quake-blender/)
 describing at a high level how this works.  Here's a video showing the output:
@@ -14,21 +14,21 @@ describing at a high level how this works.  Here's a video showing the output:
 Setup is complicated by the fact that we need to be able to import external
 libraries into Blender's Python path. To do this you'll need a Python virtualenv
 installed on your machine.  The Python binary that the virtualenv uses needs to
-be the same minor version as Blender's (ie. 3.7.x if using Blender 2.90.1).
+be the same minor version as Blender's (ie. 3.10.x if using Blender 3.2.0).
 
 On Linux one way to achieve this is by using
 [virtualenvwrapper](https://virtualenvwrapper.readthedocs.io/en/latest/) on the
 Python binary distributed with Blender:
 
 ```
-mkvirtualenv blendquake -p ~/blender-2.90.1-linux64/2.90/python/bin/python3.7m
+mkvirtualenv blendquake -p ~/blender-3.2.0-linux-x64/3.2/python/bin/python3.10
 ```
 
 Once activated, checkout this repo, `cd` into it, and `pip install -e . -v` to
 install the repo in development mode
 
-Next, start Blender.  From an empty scene, open the text editor, create a new
-script, and paste in the following code:
+Next, start Blender.  Set the render engine to cycles. From an empty scene, open
+the text editor, create a new script, and paste in the following code:
 
 ```
 # Setup path.  Change the paths here to point to your virtualenv's
