@@ -55,7 +55,7 @@ def _set_uvs(mesh, texinfos, face_verts):
     assert len(bm.faces) == len(texinfos)
     for bm_face, face, texinfo in zip(bm.faces, face_verts, texinfos):
         assert len(face) == len(bm_face.loops)
-        for bm_loop, vert in zip(bm_face.loops, face):
+        for bm_loop, vert in zip(reversed(bm_face.loops), face):
             s, t = texinfo.vert_to_tex_coords(vert)
             bm_loop[uv_layer].uv = s / texinfo.texture.width, t / texinfo.texture.height
 
@@ -74,7 +74,7 @@ def _set_lightmap_uvs(mesh, faces):
     for bm_face, face in zip(bm.faces, faces):
         assert face.num_edges == len(bm_face.loops)
         if face.has_any_lightmap:
-            for bm_loop, vert, tc in zip(bm_face.loops,
+            for bm_loop, vert, tc in zip(reversed(bm_face.loops),
                                          face.vertices,
                                          face.full_lightmap_tex_coords):
                 bm_loop[uv_layer].uv = tc
@@ -343,6 +343,7 @@ def _pydata_from_faces(tuple_faces):
             if id(vert) not in d:
                 d[id(vert)] = (len(d), vert)
             int_face.append(d[id(vert)][0])
+        int_face.reverse()
         int_faces.append(int_face)
 
     verts = [None] * len(d)
