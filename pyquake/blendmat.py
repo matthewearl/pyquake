@@ -76,6 +76,7 @@ def setup_light_style_node_groups():
         input_node = group.nodes.new('NodeGroupInput')
         output_node = group.nodes.new('NodeGroupOutput')
         value_node = group.nodes.new('ShaderNodeValue')
+        value_node.outputs['Value'].default_value = 1.0
         group.links.new(output_node.inputs['Value'], value_node.outputs['Value'])
 
         groups[style_idx] = group

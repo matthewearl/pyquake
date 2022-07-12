@@ -77,7 +77,7 @@ class BlendMdl:
 
     def set_invisible_to_camera(self):
         for sub_obj in self.sub_objs:
-            sub_obj.cycles_visibility.camera = False
+            sub_obj.visible_camera = False
 
     def done(self, final_time: float, fps: float):
         if self._no_anim:
@@ -106,7 +106,7 @@ def _set_uvs(mesh, am, tri_set):
     for bm_face, tri_idx in zip(bm.faces, tri_set):
         tcs = am.get_tri_tcs(tri_idx)
 
-        for bm_loop, (s, t) in zip(bm_face.loops, tcs):
+        for bm_loop, (s, t) in zip(reversed(bm_face.loops), tcs):
             bm_loop[uv_layer].uv = s / am.header['skin_width'], t / am.header['skin_height']
 
     bm.to_mesh(mesh)
@@ -174,7 +174,7 @@ def add_model(am, pal, mdl_name, obj_name, skin_num, mdl_cfg, initial_pose_num, 
         else:
             initial_verts = am.frames[initial_pose_num].frames[0].frame_verts
         pydata, vert_map = _simplify_pydata([list(v) for v in initial_verts],
-                                            [list(am.tris[t]) for t in tri_set])
+                                            [list(reversed(am.tris[t])) for t in tri_set])
         mesh.from_pydata(*pydata)
         subobj = bpy.data.objects.new(subobj_name, mesh)
         subobj.parent = obj

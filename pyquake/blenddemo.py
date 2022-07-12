@@ -357,7 +357,8 @@ class ObjectManager:
         self.world_obj = bpy.data.objects.new(world_obj_name, None)
         bpy.context.scene.collection.objects.link(self.world_obj)
 
-        blendpart.get_particle_root().parent = self.world_obj
+        self._particles = blendpart.Particles()
+        self._particles.root.parent = self.world_obj
 
         self._width, self._height = width, height
         bpy.data.scenes['Scene'].render.resolution_x = width
@@ -439,12 +440,12 @@ class ObjectManager:
 
     def create_teleport(self, pos, time):
         obj_name = f'teleport{self._num_teleports}'
-        blendpart.create_teleport(time, obj_name, pos, self._fps)
+        self._particles.create_teleport(time, obj_name, pos, self._fps)
         self._num_teleports += 1
 
     def create_explosion(self, pos, time):
         obj_name = f'explosion{self._num_explosions}'
-        blendpart.create_explosion(time, obj_name, pos, self._fps)
+        self._particles.create_explosion(time, obj_name, pos, self._fps)
         self._num_explosions += 1
 
     def _create_managed_object(self, entity_num, model_num, skin_num, initial_pose_num):
