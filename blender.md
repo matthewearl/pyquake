@@ -6,7 +6,7 @@ scenes.  Tested with Blender 2.90.1.
 I wrote a [blog post](http://matthewearl.github.io/2021/06/20/quake-blender/)
 describing at a high level how this works.  Here's a video showing the output:
 
-[![Quake path traced in Blender](https://img.youtube.com/vi/uX0Ye7qhRd4/0.jpg)](https://www.youtube.com/watch?v=uX0Ye7qhRd4) 
+[![Quake path traced in Blender](https://img.youtube.com/vi/uX0Ye7qhRd4/maxresdefault.jpg)](https://www.youtube.com/watch?v=uX0Ye7qhRd4) 
 
 
 ## Setup
