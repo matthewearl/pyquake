@@ -23,6 +23,7 @@ __all__ = (
     'ServerMessage',
     'read_demo_file',
     'clear_cache',
+    'UnsupportedProtocol',
 )
 
 
@@ -36,6 +37,10 @@ import struct
 
 
 class MalformedNetworkData(Exception):
+    pass
+
+
+class UnsupportedProtocol(Exception):
     pass
 
 
@@ -485,6 +490,11 @@ class ServerMessageUpdate(ServerMessage):
                 extend2_flags, m = m[0], m[1:]
                 flags |= extend2_flags << 24
         else:
+            if flags & (1 << 15):   # U_TRANS
+                # Some mods will send this flag for transparency when using
+                # protocol 15.  We don't support it yet, but could do.
+                raise UnsupportedProtocol('Nehahra not supported')
+
             fq_flags = flags & _UpdateFlags.fitzquake_flags()
             if fq_flags:
                 raise MalformedNetworkData(f'{fq_flags} passed but protocol is {protocol}')
