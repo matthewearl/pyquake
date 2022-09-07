@@ -49,7 +49,7 @@ int = spaces ('-' | -> ''):sign (intPart:ds -> int(sign + ds))
 prop = ws string:k ws string:v ws '\n' -> (k, v)
 vec = '(' (ws (float | int):f -> f)*:fs ws ')' -> tuple(fs)
 
-plane = ws vec:v1 ws vec:v2 ws vec:v3  ws texture_name:t ws int:x_off ws int:y_off ws float:rot_angle ws float:x_scale ws float:y_scale ws '\n'
+plane = ws vec:v1 ws vec:v2 ws vec:v3  ws texture_name:t ws float:x_off ws float:y_off ws float:rot_angle ws float:x_scale ws float:y_scale ws '\n'
     -> Plane(np.stack([v1, v2, v3]), t, (x_off, y_off), rot_angle, (x_scale, y_scale))
 
 brush = ws '{' ws '\n' plane*:p '}' ws '\n' -> p
