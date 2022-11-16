@@ -17,6 +17,7 @@ setup(name='Pyquake',
                 'pyq_extract_lights = pyquake.mapsource:extract_lights_main',
                 'pyq_pak_extract = pyquake.pak:pak_extract_main',
                 'demo_stats = pyquake.demstats:demo_stats_entrypoint',
+                'pyq_dump_progs = pyquake.progs:dump_progs_main',
           ]
       },
       description='Python Quake client',
