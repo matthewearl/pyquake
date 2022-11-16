@@ -231,6 +231,7 @@ class Progs:
         return out
 
     def read_global(self, num, type_: Type):
+        num = num * 4
         if type_ == Type.STRING:
             out = self.read_string(
                 struct.unpack('<L', self.globals_[num:num + 4])[0]
@@ -243,10 +244,7 @@ class Progs:
             out, = struct.unpack('<L', self.globals_[num:num + 4])
         elif type_ == Type.FUNCTION:
             func_idx, = struct.unpack('<L', self.globals_[num:num + 4])
-            if func_idx < len(self.functions):
-                out = self.functions[func_idx]
-            else:
-                out = f"Invalid func {func_idx}"
+            out = self.functions[func_idx]
         else:
             out = f"Unhandled type: {type_}"
 
@@ -269,7 +267,7 @@ class Progs:
 
         # Read globals
         f.seek(offsets['globals']['offset'])
-        globals_ = f.read(offsets['globals']['count'])
+        globals_ = f.read(4 * offsets['globals']['count'])
 
         # Read functions
         f.seek(offsets['functions']['offset'])
