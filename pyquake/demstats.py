@@ -9,8 +9,8 @@ from . import proto
 
 
 logger = logging.getLogger(__name__)
-_SKILL_RE = r'Playing on (?P<skill>\w+) skill\n'
-_TIME_RE = r'\nexact time was (?P<time>\S+)\n'
+_SKILL_RE = r'.*Playing on (?P<skill>\w+) skill'
+_TIME_RE = r'(exact time was|The recorded time was) (?P<time>\S+)'
 
 
 class Stat(enum.IntEnum):
@@ -47,6 +47,7 @@ def demo_stats_entrypoint():
     player_name = None
     joequake_time = None
     skill = None
+    print_buf = ""
 
     def print_stats():
         formatted_time = _format_time(finish_time)
@@ -112,9 +113,14 @@ def demo_stats_entrypoint():
                 player_name = msg.name
 
             if msg.msg_type == proto.ServerMessageType.PRINT:
-                if (m := re.match(_TIME_RE, msg.string)):
-                    joequake_time = m.group('time')
-                if (m := re.match(_SKILL_RE, msg.string)):
-                    skill = m.group('skill')
+                print_buf += msg.string
+                if '\n' in print_buf:
+                    lines = print_buf.split('\n')
+                    for line in lines[:-1]:
+                        if (m := re.match(_TIME_RE, line)):
+                            joequake_time = m.group('time')
+                        if (m := re.match(_SKILL_RE, line)):
+                            skill = m.group('skill')
+                    print_buf = lines[-1]
 
     print_stats()
