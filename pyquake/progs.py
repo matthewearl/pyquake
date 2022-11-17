@@ -195,7 +195,7 @@ class Statement:
 
 @dataclasses.dataclass
 class Definition:
-    progs: Progs
+    progs: Progs = dataclasses.field(repr=False)
     type_: int
     save_global: bool
     ofs: int
@@ -245,6 +245,9 @@ class Progs:
         elif type_ == Type.FUNCTION:
             func_idx, = struct.unpack('<L', self.globals_[num:num + 4])
             out = self.functions[func_idx]
+        elif type_ == Type.FIELD:
+            ofs, = struct.unpack('<L', self.globals_[num:num + 4])
+            out = next(iter(d for d in self.field_defs if d.ofs == ofs))
         else:
             out = f"Unhandled type: {type_}"
 
