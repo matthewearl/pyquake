@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import dataclasses
 import enum
 import struct
@@ -15,7 +16,13 @@ def _read_struct(fmt, f):
     return struct.unpack(fmt, f.read(size))
 
 
+class _Formattable(abc.ABC):
+    def format(self) -> str:
+        raise NotImplementedError
+
+
 @dataclasses.dataclass
+@_Formattable.register
 class Function:
     progs: Progs = dataclasses.field(repr=False)
     first_statement: int
@@ -43,6 +50,9 @@ class Function:
     @property
     def file(self):
         return self.progs.read_string(self.s_file)
+
+    def format(self) -> str:
+        return self.name
 
 
 class Op(enum.IntEnum):
@@ -166,6 +176,7 @@ _STORE_OPS = {
     Op.STORE_FLD: (True, Type.ENTITY),
 }
 
+
 @dataclasses.dataclass
 class Statement:
     progs: Progs
@@ -179,21 +190,39 @@ class Statement:
         op_int, *args = _read_struct("<Hhhh", f)
         return cls(None, Op(op_int), *args)
 
+    def _format_arg(self, offset, type_) -> str:
+        try:
+            global_def = self.progs.find_global_def(offset, type_)
+        except KeyError:
+            out = f"*({type_.format()}*){offset}"
+        else:
+            if global_def.name != "IMMEDIATE":
+                out = global_def.name
+            else:
+                val = self.progs.read_global(offset, type_)
+                if isinstance(val, _Formattable):
+                    out = val.format()
+                else:
+                    out = str(val)
+        return out
+
     def format(self):
         # OP_LOAD_*  :  Copy field at offset <B> from entity <A> into <C>
 
-
         if self.op in _BINARY_OPS:
             op_str, c_type, a_type, b_type = _BINARY_OPS[self.op]
-            out = (f"*({c_type.format()}*){self.c} ="
-                   f" *({a_type.format()}*){self.a} {op_str}"
-                   f" *({b_type.format()}*){self.b}")
+            out = (f"{self._format_arg(self.c, c_type)} = "
+                   f"{self._format_arg(self.a, a_type)} {op_str} "
+                   f"{self._format_arg(self.b, b_type)}")
+
+            out = out + " " * 20 + str((self.op, self.a, self.b, self.c))
         else:
             out = str((self.op, self.a, self.b, self.c))
         return out
 
 
 @dataclasses.dataclass
+@_Formattable.register
 class Definition:
     progs: Progs = dataclasses.field(repr=False)
     type_: int
@@ -211,6 +240,9 @@ class Definition:
     @property
     def name(self):
         return self.progs.read_string(self.s_name)
+
+    def format(self) -> str:
+        return self.name
     
 
 @dataclasses.dataclass
@@ -230,23 +262,23 @@ class Progs:
             out = out[:out.index('\0')]
         return out
 
-    def read_global(self, num, type_: Type):
-        num = num * 4
+    def read_global(self, offset, type_: Type):
+        offset = offset * 4
         if type_ == Type.STRING:
             out = self.read_string(
-                struct.unpack('<L', self.globals_[num:num + 4])[0]
+                struct.unpack('<L', self.globals_[offset:offset + 4])[0]
             )
         elif type_ == Type.FLOAT:
-            out, = struct.unpack('<f', self.globals_[num:num + 4])
+            out, = struct.unpack('<f', self.globals_[offset:offset + 4])
         elif type_ == Type.VECTOR:
-            out = struct.unpack('<fff', self.globals_[num:num + 12])
+            out = struct.unpack('<fff', self.globals_[offset:offset + 12])
         elif type_ == Type.ENTITY:
-            out, = struct.unpack('<L', self.globals_[num:num + 4])
+            out, = struct.unpack('<L', self.globals_[offset:offset + 4])
         elif type_ == Type.FUNCTION:
-            func_idx, = struct.unpack('<L', self.globals_[num:num + 4])
+            func_idx, = struct.unpack('<L', self.globals_[offset:offset + 4])
             out = self.functions[func_idx]
         elif type_ == Type.FIELD:
-            ofs, = struct.unpack('<L', self.globals_[num:num + 4])
+            ofs, = struct.unpack('<L', self.globals_[offset:offset + 4])
             out = next(iter(d for d in self.field_defs if d.ofs == ofs))
         else:
             out = f"Unhandled type: {type_}"
@@ -295,6 +327,9 @@ class Progs:
         return cls(version, crc, strings, globals_, functions, statements,
                    global_defs, field_defs)
 
+    def find_global_def(self, offset: int, type_: Type):
+        return self._global_def_dict[offset, type_]
+
     def __post_init__(self):
         for function in self.functions:
             function.progs = self
@@ -307,6 +342,11 @@ class Progs:
 
         for field_def in self.field_defs:
             field_def.progs = self
+
+        self._global_def_dict = {
+            (global_def.ofs, global_def.type_): global_def
+            for global_def in self.global_defs
+        }
 
 
 def dump_progs_main():
@@ -324,6 +364,8 @@ def dump_progs_main():
     fs = pak.Filesystem(parsed.base_dir, parsed.game)
     with fs.open('progs.dat') as f:
         pr = Progs.load(f)
+
+        print('------- FUNCTIONS --------')
         for func in pr.functions:
             print(func.name, func.file)
 
@@ -331,11 +373,13 @@ def dump_progs_main():
             func.first_statement: func for func in pr.functions
         }
 
+        print('------- STATEMENTS --------')
         for num, statement in enumerate(pr.statements):
             if num in statement_funcs:
                 func = statement_funcs[num]
                 print("//", func.file, ':', func.name)
             print(statement.format())
 
+        print('------- GLOBAL DEFS --------')
         for d in pr.global_defs: 
             print((d.type_, d.name, d.ofs, pr.read_global(d.ofs, d.type_)))
