@@ -678,7 +678,7 @@ class ObjectManager:
 
 
 def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
-             load_level=True, relative_time=False, fov=120, width=1920, height=1080):
+             load_level=True, view_entity_only=False, relative_time=False, fov=120, width=1920, height=1080):
     assert not relative_time, "Not yet supported"
 
     baseline_entities: Dict[int, _EntityInfo] = collections.defaultdict(lambda: _DEFAULT_BASELINE)
@@ -688,6 +688,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
     demo_done = False
     obj_mgr = ObjectManager(fs, config, fps, fov, width, height, world_obj_name, load_level)
     last_time = 0.
+    view_entity_num = None
 
     msg_iter = proto.read_demo_file(demo_file)
 
@@ -716,6 +717,7 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
 
             if parsed.msg_type == proto.ServerMessageType.SETVIEW:
                 obj_mgr.set_view_entity(parsed.viewentity)
+                view_entity_num = parsed.viewentity
 
             if parsed.msg_type == proto.ServerMessageType.SETANGLE:
                 fixed_view_angles = parsed.view_angles
@@ -735,12 +737,13 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
                 )
 
             if parsed.msg_type == proto.ServerMessageType.UPDATE:
-                baseline = baseline_entities[parsed.entity_num]
-                prev_info = entities.get(parsed.entity_num, baseline)
-                entities[parsed.entity_num] = prev_info.update(parsed, baseline)
-                updated.add(parsed.entity_num)
+                if not view_entity_only or parsed.entity_num == view_entity_num:
+                    baseline = baseline_entities[parsed.entity_num]
+                    prev_info = entities.get(parsed.entity_num, baseline)
+                    entities[parsed.entity_num] = prev_info.update(parsed, baseline)
+                    updated.add(parsed.entity_num)
 
-            if parsed.msg_type == proto.ServerMessageType.TEMP_ENTITY:
+            if parsed.msg_type == proto.ServerMessageType.TEMP_ENTITY and not view_entity_only:
                 if parsed.temp_entity_type == proto.TempEntityTypes.EXPLOSION:
                     obj_mgr.create_explosion(parsed.origin, time)
                 elif parsed.temp_entity_type == proto.TempEntityTypes.TELEPORT:
