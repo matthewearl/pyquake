@@ -722,7 +722,8 @@ def add_demo(demo_file, fs, config, fps=30, world_obj_name='demo',
             if parsed.msg_type == proto.ServerMessageType.SETANGLE:
                 fixed_view_angles = parsed.view_angles
 
-            if parsed.msg_type == proto.ServerMessageType.SPAWNSTATIC:
+            if (parsed.msg_type == proto.ServerMessageType.SPAWNSTATIC
+                    and not view_entity_only):
                 obj_mgr.create_static_object(
                     parsed.model_num, parsed.frame, parsed.origin, parsed.angles, parsed.skin
                 )
