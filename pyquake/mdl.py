@@ -207,7 +207,7 @@ class AliasModel:
 
     def get_tri_tcs(self, tri_idx):
         faces_front = self.faces_front[tri_idx]
-        tcs = self.tcs[self.tris[tri_idx]].astype(np.float)
+        tcs = self.tcs[self.tris[tri_idx]].astype(np.float64)
         on_seam = self.on_seam[self.tris[tri_idx]]
         if not faces_front:
             tcs[on_seam > 0, 0] += self.header['skin_width'] / 2

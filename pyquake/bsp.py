@@ -371,8 +371,8 @@ class Face(NamedTuple):
     def _local_lightmap_shape(self):
         tex_coords = np.array(list(self.tex_coords))
 
-        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
-        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int32)
+        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int32)
 
         size = (maxs - mins) + 1
         return (size[1], size[0])
@@ -381,8 +381,8 @@ class Face(NamedTuple):
     def _local_lightmap_tcs(self):
         tex_coords = np.array(list(self.tex_coords))
 
-        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
-        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
+        mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int32)
+        maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int32)
 
         tex_coords -= mins * 16
         tex_coords += 8

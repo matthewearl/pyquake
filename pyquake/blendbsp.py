@@ -84,7 +84,7 @@ def _set_lightmap_uvs(mesh, faces):
 
 def _load_lightmap_im(lightmap_array, lightmap_idx):
     lightmap_array = (lightmap_array / 255)
-    lightmap_rgba = np.empty(lightmap_array.shape + (4,), dtype=np.float)
+    lightmap_rgba = np.empty(lightmap_array.shape + (4,), dtype=float)
     lightmap_rgba[:, :, :3] = lightmap_array[:, :, None]
     lightmap_rgba[:, :, 3] = 1.0
     return blendmat.im_from_array(f'lightmap_{lightmap_idx}', lightmap_rgba)
