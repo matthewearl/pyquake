@@ -408,6 +408,11 @@ class Face(NamedTuple):
 
         return lightmap
 
+    @property
+    @functools.lru_cache(None)
+    def id_(self):
+        return self.bsp.faces.index(self)
+
     def __hash__(self):
         return hash(id(self))
 
