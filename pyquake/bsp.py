@@ -84,6 +84,12 @@ class Plane(NamedTuple):
     dist: float
     plane_type: PlaneType
 
+    def point_dist(self, point):
+        return np.dot(point, self.normal) - self.dist
+
+    def infront(self, point):
+        return self.point_dist(point) >= 0
+
 
 class BBox(NamedTuple):
     mins: Tuple[int, int, int]
@@ -128,8 +134,16 @@ class Node(NamedTuple):
     plane_id: int
     child_ids: Tuple[int, int]
     bbox: BBox
-    face_id: int
+    first_face_idx: int
     num_faces: int
+
+    @property
+    def model(self):
+        return self.bsp._node_to_model[self]
+
+    @property
+    def faces(self):
+        return self.model.faces[self.first_face_idx:self.first_face_idx + self.num_faces]
 
     @property
     def plane(self):
@@ -146,6 +160,13 @@ class Node(NamedTuple):
             return self.bsp.leaves[-self.child_ids[child_num] - 1]
         else:
             return self.bsp.nodes[self.child_ids[child_num]]
+
+    @property
+    def nodes(self):
+        yield self
+        for child_num in range(2):
+            if not self.child_is_leaf(child_num):
+                yield from self.get_child(child_num).nodes
 
     @property
     def leaves(self):
@@ -567,6 +588,11 @@ class Bsp:
 
     @property
     @functools.lru_cache(None)
+    def _node_to_model(self):
+        return {node: model for model in self.models for node in model.node.nodes}
+
+    @property
+    @functools.lru_cache(None)
     def _face_to_leaf(self):
         return {face: leaf for leaf in self.leaves for face in leaf.faces}
 
@@ -727,9 +753,9 @@ class Bsp:
         self.textures = self._read_textures(f, texture_dir_entry)
 
         logging.debug("Reading nodes")
-        def read_node(plane_id, c1, c2, mins1, mins2, mins3, maxs1, maxs2, maxs3, face_id, num_faces):
+        def read_node(plane_id, c1, c2, mins1, mins2, mins3, maxs1, maxs2, maxs3, first_face_idx, num_faces):
             bbox = BBox((mins1, mins2, mins3), (maxs1, maxs2, maxs3))
-            return Node(self, plane_id, (c1, c2), bbox, face_id, num_faces)
+            return Node(self, plane_id, (c1, c2), bbox, first_face_idx, num_faces)
         if version == BspVersion.BSP:
             node_fmt = "<lhhhhhhhhHH"
         elif version == BspVersion._2PSB:
