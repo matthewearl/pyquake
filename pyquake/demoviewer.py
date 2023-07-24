@@ -39,15 +39,6 @@ logger = logging.getLogger(__name__)
 REFERENCE_RADIUS = 100
 SCREEN_SIZE = (1600, 1200)
 
-COLOR_CYCLE = [
-    (1., 0., 0.),
-    (0., 1., 0.),
-    (0., 0., 1.),
-    (0., 1., 1.),
-    (1., 0., 1.),
-    (1., 1., 0.),
-]
-
 
 class FpsDisplay:
     def __init__(self):
@@ -170,7 +161,6 @@ class DemoViewer:
         for idx, demo_view in enumerate(self._demo_views):
             if self._first_person and idx == 0:
                 continue
-            #GL.glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             try:
@@ -185,7 +175,7 @@ class DemoViewer:
                 self._draw_circle()
             else:
                 GL.glColor4f(1, 0, 0, 0.5)
-                GL.glScalef(30, 30, 30);
+                GL.glScalef(30, 30, 30)
                 self._draw_cross()
             GL.glPopMatrix()
         GL.glPopAttrib()
@@ -199,11 +189,11 @@ class DemoViewer:
     def _draw_frame(self):
         self._fps_display.new_frame()
 
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
         GL.glLoadIdentity()
-        GL.glRotatef (-90,  1, 0, 0)
-        GL.glRotatef (90,  0, 0, 1)
+        GL.glRotatef(-90,  1, 0, 0)
+        GL.glRotatef(90,  0, 0, 1)
 
         if self._first_person:
             self._set_view_from_demo()
@@ -220,7 +210,7 @@ class DemoViewer:
 
         pygame.init()
 
-        screen = pygame.display.set_mode(SCREEN_SIZE, pygl.HWSURFACE | pygl.OPENGL | pygl.DOUBLEBUF)
+        _ = pygame.display.set_mode(SCREEN_SIZE, pygl.HWSURFACE | pygl.OPENGL | pygl.DOUBLEBUF)
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.resize(*SCREEN_SIZE)
 

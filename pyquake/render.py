@@ -50,17 +50,17 @@ class Renderer:
 
     def _setup_buffer_objects(self):
         vertex_array = [v for face in self._bsp.faces
-                          if face.has_any_lightmap
-                          for v in face.vertices]
+                        if face.has_any_lightmap
+                        for v in face.vertices]
         texcoord_array = [v for face in self._bsp.faces
-                            if face.has_any_lightmap
-                            for v in face.full_lightmap_tex_coords]
+                          if face.has_any_lightmap
+                          for v in face.full_lightmap_tex_coords]
         model_faces = {i for m in self._bsp.models[1:]
-                         for i in range(m.first_face_idx, m.first_face_idx + m.num_faces)}
+                       for i in range(m.first_face_idx, m.first_face_idx + m.num_faces)}
         color_array = [[0, 1, 0] if face.id_ in model_faces else [1, 1, 1]
-                         for face in self._bsp.faces
-                         if face.has_any_lightmap
-                         for v in face.vertices]
+                       for face in self._bsp.faces
+                       if face.has_any_lightmap
+                       for v in face.vertices]
         assert len({len(vertex_array), len(texcoord_array), len(color_array)}) == 1
 
         # Array of indices into the vertex array such that rendering vertices in this order with GL_TRIANGLES will
@@ -93,23 +93,23 @@ class Renderer:
         self._index_array_len = len(index_array)
 
         pos_bo, texcoord_bo, color_bo, self._index_bo = GL.glGenBuffers(4)
-        
+
         # Set up the vertex position buffer
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, pos_bo);
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, pos_bo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(vertex_array), vertex_array, GL.GL_STATIC_DRAW)
         GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
         GL.glVertexPointer(3, GL.GL_FLOAT, 12, None)
 
         # Set up the tex coord buffer
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, texcoord_bo);
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(texcoord_array), texcoord_array, GL.GL_STATIC_DRAW);
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, texcoord_bo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(texcoord_array), texcoord_array, GL.GL_STATIC_DRAW)
         GL.glClientActiveTexture(GL.GL_TEXTURE0)
         GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
         GL.glTexCoordPointer(2, GL.GL_FLOAT, 8, None)
 
         # Set up the color buffer
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, color_bo);
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(color_array), color_array, GL.GL_STATIC_DRAW);
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, color_bo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(color_array), color_array, GL.GL_STATIC_DRAW)
         GL.glEnableClientState(GL.GL_COLOR_ARRAY)
         GL.glColorPointer(3, GL.GL_FLOAT, 0, None)
 
