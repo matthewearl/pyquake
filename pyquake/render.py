@@ -22,13 +22,12 @@ import ctypes
 import logging
 import time
 
-from OpenGL.GL import *
-from OpenGL.GLU import *
-from OpenGL.GLUT import *
-from OpenGL.arrays import ArrayDatatype as ADT
-from pygame.locals import *
 import numpy as np
 import pygame
+import pygame.locals as pygl
+from OpenGL import GL
+from OpenGL.GLU import gluPerspective
+from OpenGL.arrays import ArrayDatatype as ADT
 
 from . import demo
 
@@ -96,12 +95,12 @@ class Renderer:
         self._demo_offsets = np.zeros((len(demo_views),), dtype=np.float32)
         
     def resize(self, width, height):
-        glViewport(0, 0, width, height)
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
+        GL.glViewport(0, 0, width, height)
+        GL.glMatrixMode(GL.GL_PROJECTION)
+        GL.glLoadIdentity()
         gluPerspective(60.0, float(width) / height, 10., 20000.)
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
+        GL.glMatrixMode(GL.GL_MODELVIEW)
+        GL.glLoadIdentity()
 
     def _draw_speed(self):
         delta_t = 0.05
@@ -136,14 +135,14 @@ class Renderer:
                     break
 
     def _setup_textures(self):
-        self._lightmap_texture_id = glGenTextures(1)
+        self._lightmap_texture_id = GL.glGenTextures(1)
 
-        glBindTexture(GL_TEXTURE_2D, self._lightmap_texture_id)
-        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._lightmap_texture_id)
+        GL.glTexEnvf(GL.GL_TEXTURE_ENV, GL.GL_TEXTURE_ENV_MODE, GL.GL_MODULATE)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
 
-        glTexImage2Df(GL_TEXTURE_2D, 0, 3, 0, GL_RGB, self._lightmap_image / 255.)
+        GL.glTexImage2Df(GL.GL_TEXTURE_2D, 0, 3, 0, GL.GL_RGB, self._lightmap_image / 255.)
 
     def _setup_buffer_objects(self):
         vertex_array = [v for face in self._bsp.faces
@@ -189,123 +188,123 @@ class Renderer:
         index_array = np.array(index_array, dtype=np.uint32)
         self._index_array_len = len(index_array)
 
-        pos_bo, texcoord_bo, color_bo, self._index_bo = glGenBuffers(4)
+        pos_bo, texcoord_bo, color_bo, self._index_bo = GL.glGenBuffers(4)
         
         # Set up the vertex position buffer
-        glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
-        glBufferData(GL_ARRAY_BUFFER, ADT.arrayByteCount(vertex_array), vertex_array, GL_STATIC_DRAW)
-        glEnableClientState(GL_VERTEX_ARRAY)
-        glVertexPointer(3, GL_FLOAT, 12, None)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, pos_bo);
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(vertex_array), vertex_array, GL.GL_STATIC_DRAW)
+        GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
+        GL.glVertexPointer(3, GL.GL_FLOAT, 12, None)
 
         # Set up the tex coord buffer
-        glBindBuffer(GL_ARRAY_BUFFER, texcoord_bo);
-        glBufferData(GL_ARRAY_BUFFER, ADT.arrayByteCount(texcoord_array), texcoord_array, GL_STATIC_DRAW);
-        glClientActiveTexture(GL_TEXTURE0)
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY)
-        glTexCoordPointer(2, GL_FLOAT, 8, None)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, texcoord_bo);
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(texcoord_array), texcoord_array, GL.GL_STATIC_DRAW);
+        GL.glClientActiveTexture(GL.GL_TEXTURE0)
+        GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
+        GL.glTexCoordPointer(2, GL.GL_FLOAT, 8, None)
 
         # Set up the color buffer
-        glBindBuffer(GL_ARRAY_BUFFER, color_bo);
-        glBufferData(GL_ARRAY_BUFFER, ADT.arrayByteCount(color_array), color_array, GL_STATIC_DRAW);
-        glEnableClientState(GL_COLOR_ARRAY)
-        glColorPointer(3, GL_FLOAT, 0, None)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, color_bo);
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, ADT.arrayByteCount(color_array), color_array, GL.GL_STATIC_DRAW);
+        GL.glEnableClientState(GL.GL_COLOR_ARRAY)
+        GL.glColorPointer(3, GL.GL_FLOAT, 0, None)
 
         # Set up the index buffer
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, ADT.arrayByteCount(index_array), index_array, GL_STATIC_DRAW)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
+        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, ADT.arrayByteCount(index_array), index_array, GL.GL_STATIC_DRAW)
 
     def _get_time(self):
         return self._timer.time
 
     def _draw_bsp(self):
-        glEnable(GL_TEXTURE_2D)
-        glBindTexture(GL_TEXTURE_2D, self._lightmap_texture_id)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._lightmap_texture_id)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self._index_bo)
         _, _, model_pos = self._demo_views[0].get_view_at_time(self._get_time())
 
         for idx, m in enumerate(self._bsp.models):
             start_idx, _ = self._face_to_idx[m.first_face_idx]
             end_idx, n = self._face_to_idx[m.first_face_idx + m.num_faces - 1]
             end_idx += n
-            glPushMatrix()
-            glTranslate(*model_pos[idx])
-            glDrawElements(GL_TRIANGLES, end_idx - start_idx, GL_UNSIGNED_INT, ctypes.c_void_p(4 * start_idx))
-            glPopMatrix()
+            GL.glPushMatrix()
+            GL.glTranslate(*model_pos[idx])
+            GL.glDrawElements(GL.GL_TRIANGLES, end_idx - start_idx, GL.GL_UNSIGNED_INT, ctypes.c_void_p(4 * start_idx))
+            GL.glPopMatrix()
 
     def _draw_circle(self):
-        glBegin(GL_TRIANGLE_FAN)
+        GL.glBegin(GL.GL_TRIANGLE_FAN)
         for theta in np.arange(0, 1, 0.05) * 2 * np.pi:
-            glVertex3f(np.sin(theta), np.cos(theta), 0.)
-        glEnd()
+            GL.glVertex3f(np.sin(theta), np.cos(theta), 0.)
+        GL.glEnd()
 
     def _draw_cross(self):
-        glBegin(GL_LINES)
-        glVertex3f(-1, 0, 0)
-        glVertex3f(1, 0, 0)
-        glVertex3f(0, -1, 0)
-        glVertex3f(0, +1, 0)
-        glVertex3f(0, 0, -1)
-        glVertex3f(0, 0, +1)
-        glEnd()
+        GL.glBegin(GL.GL_LINES)
+        GL.glVertex3f(-1, 0, 0)
+        GL.glVertex3f(1, 0, 0)
+        GL.glVertex3f(0, -1, 0)
+        GL.glVertex3f(0, +1, 0)
+        GL.glVertex3f(0, 0, -1)
+        GL.glVertex3f(0, 0, +1)
+        GL.glEnd()
 
     def _show_demo_views(self):
-        glPushAttrib(GL_ENABLE_BIT)
-        glDisable(GL_TEXTURE_2D)
-        glDisable(GL_DEPTH_TEST)
-        glMatrixMode(GL_MODELVIEW)
+        GL.glPushAttrib(GL.GL_ENABLE_BIT)
+        GL.glDisable(GL.GL_TEXTURE_2D)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glMatrixMode(GL.GL_MODELVIEW)
         current_time = self._get_time()
 
         for idx, demo_view in enumerate(self._demo_views):
             if self._first_person and idx == 0:
                 continue
-            #glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
-            glEnable(GL_BLEND)
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            #GL.glColor3f(*COLOR_CYCLE[idx % len(COLOR_CYCLE)])
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             try:
                 view_angle, pos, _ = demo_view.get_view_at_time(current_time + self._demo_offsets[idx])
             except StopIteration:
                 continue
-            glPushMatrix()
-            glTranslate(*pos)
+            GL.glPushMatrix()
+            GL.glTranslate(*pos)
             if idx == 0:
-                glColor4f(1, 1, 0, 0.2)
-                glScalef(*([REFERENCE_RADIUS] * 3))
+                GL.glColor4f(1, 1, 0, 0.2)
+                GL.glScalef(*([REFERENCE_RADIUS] * 3))
                 self._draw_circle()
             else:
-                glColor4f(1, 0, 0, 0.5)
-                glScalef(30, 30, 30);
+                GL.glColor4f(1, 0, 0, 0.5)
+                GL.glScalef(30, 30, 30);
                 self._draw_cross()
-            glPopMatrix()
+            GL.glPopMatrix()
 
-        glPopAttrib()
+        GL.glPopAttrib()
 
     def _set_view_from_demo(self):
         view_angle, pos, _ = self._demo_views[0].get_view_at_time(self._get_time())
 
-        glRotatef(-view_angle[0], 0, 1, 0)
-        glRotatef(-view_angle[1], 0, 0, 1)
-        glTranslate(*-np.array(pos))
+        GL.glRotatef(-view_angle[0], 0, 1, 0)
+        GL.glRotatef(-view_angle[1], 0, 0, 1)
+        GL.glTranslate(*-np.array(pos))
 
     def _set_view_to_player_start(self):
         player_start = next(iter(e for e in self._bsp.entities if e['classname'] == 'info_player_start'))
-        glRotatef(-player_start['angle'], 0, 0, 1)
-        glTranslate(*-np.array(player_start['origin']))
+        GL.glRotatef(-player_start['angle'], 0, 0, 1)
+        GL.glTranslate(*-np.array(player_start['origin']))
 
     def _draw_frame(self):
         self._fps_display.new_frame()
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        #glUseProgram(self._shader)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT);
+        #GL.glUseProgram(self._shader)
 
-        glLoadIdentity()
-        glRotatef (-90,  1, 0, 0)
-        glRotatef (90,  0, 0, 1)
+        GL.glLoadIdentity()
+        GL.glRotatef (-90,  1, 0, 0)
+        GL.glRotatef (90,  0, 0, 1)
 
         if self._first_person:
             self._set_view_from_demo()
         else:
-            glRotatef(90, 0, -1, 0)
-            glTranslate(*-(self._centre + [0, 0, 3000]))
+            GL.glRotatef(90, 0, -1, 0)
+            GL.glTranslate(*-(self._centre + [0, 0, 3000]))
 
         self._draw_bsp()
         self._show_demo_views()
@@ -316,10 +315,10 @@ class Renderer:
         self._game_start_time = time.perf_counter()
 
         pygame.init()
-        screen = pygame.display.set_mode(SCREEN_SIZE, HWSURFACE | OPENGL | DOUBLEBUF)
+        screen = pygame.display.set_mode(SCREEN_SIZE, pygl.HWSURFACE | pygl.OPENGL | pygl.DOUBLEBUF)
         self._setup_textures()
         self._setup_buffer_objects()
-        glEnable(GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_DEPTH_TEST)
         self.resize(*SCREEN_SIZE)
 
         self._centre = np.array(self._bsp.vertices).mean(axis=0)
@@ -327,25 +326,25 @@ class Renderer:
         x = 0.
         while True:
             for event in pygame.event.get():
-                if event.type == QUIT:
+                if event.type == pygl.QUIT:
                     return
-                if event.type == KEYUP and event.key == K_ESCAPE:
+                if event.type == pygl.KEYUP and event.key == pygl.K_ESCAPE:
                     return                
-                if event.type == KEYUP and event.key == ord(' '):
+                if event.type == pygl.KEYUP and event.key == ord(' '):
                     self._timer.paused = not self._timer.paused
                     if self._timer.paused:
                         print("Paused at {:.2f}".format(self._get_time()))
-                if event.type == KEYUP and event.key == ord('f'):
+                if event.type == pygl.KEYUP and event.key == ord('f'):
                     self._first_person = not self._first_person
-                if event.type == KEYUP and event.key == ord('n'):
+                if event.type == pygl.KEYUP and event.key == ord('n'):
                     self._timer.shift(-1)
-                if event.type == KEYUP and event.key == ord('m'):
+                if event.type == pygl.KEYUP and event.key == ord('m'):
                     self._timer.shift(1)
-                if event.type == KEYUP and event.key == ord('j'):
+                if event.type == pygl.KEYUP and event.key == ord('j'):
                     self._timer.change_speed(-1)
-                if event.type == KEYUP and event.key == ord('k'):
+                if event.type == pygl.KEYUP and event.key == ord('k'):
                     self._timer.change_speed(1)
-                if event.type == KEYUP and event.key == ord('x'):
+                if event.type == pygl.KEYUP and event.key == ord('x'):
                     self._sync_demos_to_reference()
             self._draw_frame()
             pygame.display.flip()
