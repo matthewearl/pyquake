@@ -28,10 +28,8 @@ from OpenGL.GLUT import *
 from OpenGL.arrays import ArrayDatatype as ADT
 from pygame.locals import *
 import numpy as np
-import OpenGL.GL.shaders
 import pygame
 
-from . import boxpack
 from . import demo
 
 
@@ -50,58 +48,6 @@ COLOR_CYCLE = [
     (1., 1., 0.),
 ]
 
-
-def face_has_lightmap(bsp, face_idx):
-    face = bsp.faces[face_idx]
-    return face.lightmap_offset != -1
-
-
-def extract_lightmap_texture(bsp, face_idx):
-    face = bsp.faces[face_idx]
-
-    tex_coords = np.array(list(face.tex_coords))
-
-    mins = np.floor(np.min(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
-    maxs = np.ceil(np.max(tex_coords, axis=0).astype(np.float32) / 16).astype(np.int)
-
-    size = (maxs - mins) + 1
-
-    lightmap = np.array(list(bsp.lightmap[face.lightmap_offset:
-                                          face.lightmap_offset + size[0] * size[1]])).reshape((size[1], size[0]))
-
-    tex_coords -= mins * 16
-    tex_coords += 8
-    tex_coords /= 16.
-
-    return lightmap, tex_coords
-
-
-# TODO: Replace this with Bsp.full_lightmap_image and Face.full_lightmap_tex_coords
-def make_full_lightmap(bsp, lightmap_size=(512, 512)):
-    logger.info("Making lightmap")
-    lightmaps = {face_idx: extract_lightmap_texture(bsp, face_idx)
-                    for face_idx in range(len(bsp.faces))
-                    if face_has_lightmap(bsp, face_idx)}
-
-    lightmaps = dict(reversed(sorted(lightmaps.items(), key=lambda x: x[1][0].shape[0] * x[1][0].shape[1])))
-
-    box_packer = boxpack.BoxPacker(lightmap_size)
-    for face_idx, (lightmap, tex_coords) in lightmaps.items():
-        if not box_packer.insert(face_idx, (lightmap.shape[1], lightmap.shape[0])):
-            raise Exception("Could not pack lightmaps into {} image".format(lightmap_size))
-
-    lightmap_image = np.zeros((lightmap_size[1], lightmap_size[0]), dtype=np.uint8)
-    tex_coords = {}
-    for face_idx, (x, y) in box_packer:
-        lm, tc = lightmaps[face_idx]
-        lightmap_image[y:y + lm.shape[0], x:x + lm.shape[1]] = lm
-        tex_coords[face_idx] = (tc + (x, y)) / lightmap_size
-
-    return lightmap_image, tex_coords
-
-
-def get_face_coords(bsp):
-    return {face_idx: np.array([v for v in face.vertices]) for face_idx, face in enumerate(bsp.faces)}
 
 class FpsDisplay:
     def __init__(self):
@@ -143,9 +89,8 @@ class Renderer:
         self._bsp = bsp
         self._bsp_model_origins = np.zeros((len(bsp.models), 3))
         self._demo_views = demo_views
-        self._lightmap_image, self._lightmap_texcoords = make_full_lightmap(self._bsp)
+        self._lightmap_image = np.sum(self._bsp.full_lightmap_image, axis=0)
         self._lightmap_image = np.stack([self._lightmap_image] * 3, axis=2)
-        self._face_coords = get_face_coords(self._bsp)
         self._first_person = False
         self._timer = Timer()
         self._demo_offsets = np.zeros((len(demo_views),), dtype=np.float32)
@@ -201,26 +146,27 @@ class Renderer:
         glTexImage2Df(GL_TEXTURE_2D, 0, 3, 0, GL_RGB, self._lightmap_image / 255.)
 
     def _setup_buffer_objects(self):
-        vertex_array = [v for face_idx in range(len(self._bsp.faces))
-                          if face_idx in self._lightmap_texcoords
-                          for v in self._face_coords[face_idx]]
-        texcoord_array = [v for face_idx in range(len(self._bsp.faces))
-                            if face_idx in self._lightmap_texcoords
-                            for v in self._lightmap_texcoords[face_idx]]
+        vertex_array = [v for face in self._bsp.faces
+                          if face.has_any_lightmap
+                          for v in face.vertices]
+        texcoord_array = [v for face in self._bsp.faces
+                            if face.has_any_lightmap
+                            for v in face.full_lightmap_tex_coords]
         model_faces = {i for m in self._bsp.models[1:]
                          for i in range(m.first_face_idx, m.first_face_idx + m.num_faces)}
-        color_array = [[0, 1, 0] if face_idx in model_faces else [1, 1, 1]
-                         for face_idx in range(len(self._bsp.faces))
-                         if face_idx in self._lightmap_texcoords
-                         for v in self._lightmap_texcoords[face_idx]]
+        color_array = [[0, 1, 0] if face.id_ in model_faces else [1, 1, 1]
+                         for face in self._bsp.faces
+                         if face.has_any_lightmap
+                         for v in face.vertices]
+        assert len({len(vertex_array), len(texcoord_array), len(color_array)}) == 1
 
         # Array of indices into the vertex array such that rendering vertices in this order with GL_TRIANGLES will
         # produce all of the models in the map.
         vert_idx = 0
         index_array = []
-        for face_idx in range(len(self._bsp.faces)):
-            if face_idx in self._lightmap_texcoords:
-                num_verts_in_face = len(self._face_coords[face_idx])
+        for face in self._bsp.faces:
+            if face.has_any_lightmap:
+                num_verts_in_face = face.num_edges
                 for i in range(1, num_verts_in_face - 1):
                     index_array.extend([vert_idx, vert_idx + i, vert_idx + i + 1])
                 vert_idx += num_verts_in_face
@@ -229,13 +175,13 @@ class Renderer:
         # to render this face.
         vert_idx = 0
         self._face_to_idx = {}
-        for face_idx in range(len(self._bsp.faces)):
-            if face_idx in self._lightmap_texcoords:
-                num_verts_in_face = len(self._face_coords[face_idx])
-                self._face_to_idx[face_idx] = (vert_idx, 3 * (num_verts_in_face - 2))
+        for face in self._bsp.faces:
+            if face.has_any_lightmap:
+                num_verts_in_face = face.num_edges
+                self._face_to_idx[face.id_] = (vert_idx, 3 * (num_verts_in_face - 2))
                 vert_idx += 3 * (num_verts_in_face - 2)
             else:
-                self._face_to_idx[face_idx] = (vert_idx, 0)
+                self._face_to_idx[face.id_] = (vert_idx, 0)
 
         vertex_array = np.array(vertex_array, dtype=np.float32)
         texcoord_array = np.array(texcoord_array, dtype=np.float32)
