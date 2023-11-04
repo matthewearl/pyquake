@@ -415,6 +415,9 @@ class ObjectManager:
 
     def create_static_object(self, model_num, frame, origin, angles, skin):
         model_path = self._model_paths[model_num - 1]
+        if model_path.endswith('.spr'):
+            # Not supported
+            return
         am = mdl.AliasModel(self._fs.open(model_path))
 
         mdl_name = self._path_to_model_name(model_path)
