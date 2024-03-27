@@ -520,6 +520,7 @@ class Model(NamedTuple):
             The root clip node.
         """
         if hull_id == 0:
+            # TODO:  Convert self.node to clip node compatible?
             raise ValueError('For the point hull use Model.node')
         return self.bsp.clip_nodes[self.clip_node_ids[hull_id - 1]]
 
