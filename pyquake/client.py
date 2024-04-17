@@ -20,6 +20,7 @@
 
 import asyncio
 import collections
+import dataclasses
 import logging
 import math
 import struct
@@ -63,6 +64,10 @@ def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse, joequ
                        3, 0.,
                        encode_func(pitch), encode_func(yaw), encode_func(roll),
                        forward, side, up, buttons, impulse)
+
+
+def _patch(old_val, new_val):
+    return old_val if new_val is None else new_val
 
 
 def _patch_vec(old_vec, update):
@@ -195,6 +200,43 @@ class AngleCalculatorHysteresis(_BaseAngleCalculator):
             yield (0., yaw, 0.)
 
 
+@dataclasses.dataclass
+class Entity:
+    entity_num: int
+    model_num: int
+    frame: int
+    colormap: int
+    skin: int
+    origin: tuple[float, float, float]
+    angles: tuple[float, float, float]
+
+    @classmethod
+    def from_baseline(cls, baseline: proto.ServerMessageSpawnBaseline):
+        return cls(
+            baseline.entity_num,
+            baseline.model_num,
+            baseline.frame,
+            baseline.colormap,
+            baseline.skin,
+            baseline.origin,
+            baseline.angles
+        )
+
+    def update(self, update: proto.ServerMessageUpdate):
+        if update.entity_num is not None:
+            self.entity_num = update.entity_num
+        if update.model_num is not None:
+            self.model_num = update.model_num
+        if update.frame is not None:
+            self.frame = update.frame
+        if update.colormap is not None:
+            self.colormap = update.colormap
+        if update.skin is not None:
+            self.skin = update.skin
+        self.origin = _patch_vec(self.origin, update.origin)
+        self.angles = _patch_vec(self.angles, update.angle)
+
+
 class AsyncClient:
     def __init__(self, conn):
         self._conn = conn
@@ -205,17 +247,19 @@ class AsyncClient:
         self.time = None
         self._moved_fut = collections.defaultdict(asyncio.Future)
         self.center_print_queue = asyncio.Queue()
-        self.origins = {}
+        self.entities = {}
         self.baselines = {}
         self.angles = (0., 0., 0.)
         self.velocity = (0., 0., 0.)
         self.on_ground = None
+        self.view_height = None
+        self.models = None
 
         self._demos = []
 
     @property
-    def player_origin(self):
-        return self.origins[self.view_entity]
+    def player_entity(self):
+        return self.entities[self.view_entity]
 
     def record_demo(self):
         d = Demo()
@@ -237,6 +281,7 @@ class AsyncClient:
                     self.level_name = parsed.level_name
                     self.view_entity = None
                     self.level_finished = False
+                    self.models = parsed.models
                     has_server_info = True
 
                     protocol = parsed.protocol
@@ -268,21 +313,22 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.CLIENTDATA:
                     self.velocity = parsed.m_velocity
                     self.on_ground = parsed.on_ground
+                    self.view_height = parsed.view_height
 
                 # Update entity positions
                 if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
                     if self.view_entity is None:
                         raise ClientError("View entity not set but spawnbaseline received")
-                    self.baselines[parsed.entity_num] = parsed.origin
-                    self.origins[parsed.entity_num] = parsed.origin
+                    ent = Entity.from_baseline(parsed)
+                    self.baselines[parsed.entity_num] = ent
+                    self.entities[parsed.entity_num] = ent
                 if parsed.msg_type == proto.ServerMessageType.UPDATE:
                     ent_num = parsed.entity_num
-                    if ent_num in self.origins:
-                        self.origins[ent_num] = _patch_vec(
-                                self.baselines[ent_num], parsed.origin)
-
+                    if ent_num in self.entities:
+                        ent = self.entities[ent_num]
+                        ent.update(parsed)
                         if parsed.entity_num in self._moved_fut:
-                            self._moved_fut[ent_num].set_result(self.origins[ent_num])
+                            self._moved_fut[ent_num].set_result(ent.origin)
                         self._moved_fut[ent_num] = asyncio.Future()
 
                 if parsed.msg_type == proto.ServerMessageType.PRINT:
