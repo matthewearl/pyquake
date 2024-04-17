@@ -223,13 +223,13 @@ class AsyncClient:
         d.start_recording()
         return d
 
-    async def _read_messages(self):
+    async def _read_messages(self, protocol):
         while True:
             remaining_msg = msg = await self._conn.read_message()
 
             has_server_info = False
             while remaining_msg:
-                parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg)
+                parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg, protocol)
                 logger.debug("Got message: %s", parsed)
 
                 # Player goes "unspawned" when server info received (see SV_SendServerinfo).
@@ -238,6 +238,8 @@ class AsyncClient:
                     self.view_entity = None
                     self.level_finished = False
                     has_server_info = True
+
+                    protocol = parsed.protocol
 
                 # Handle sign-on.
                 if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
@@ -306,7 +308,7 @@ class AsyncClient:
         await self._spawned_fut
 
     @classmethod
-    async def connect(cls, host, port, joequake_version=None):
+    async def connect(cls, host, port, protocol, joequake_version=None):
         """Connect to the given host and port, and start listening for messages.
 
         At the point this coroutine returns, no messages have yet been read.
@@ -319,7 +321,7 @@ class AsyncClient:
             await conn.send_reliable(b'\x01')
 
         client = cls(conn)
-        asyncio.create_task(client._read_messages()).add_done_callback(
+        asyncio.create_task(client._read_messages(protocol)).add_done_callback(
                 lambda fut: fut.result)
         return client
 
