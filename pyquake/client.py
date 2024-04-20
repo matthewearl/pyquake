@@ -254,6 +254,7 @@ class AsyncClient:
         self.on_ground = None
         self.view_height = None
         self.models = None
+        self.disconnected = False
 
         self._demos = []
 
@@ -342,6 +343,9 @@ class AsyncClient:
 
                 if parsed.msg_type == proto.ServerMessageType.INTERMISSION:
                     self.level_finished = True
+
+                if parsed.msg_type == proto.ServerMessageType.DISCONNECT:
+                    self.disconnected = True
 
             self._demos = [d for d in self._demos if not d.recording_complete]
             for demo in self._demos:
