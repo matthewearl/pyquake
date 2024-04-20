@@ -349,7 +349,8 @@ class AsyncClient:
 
             self._demos = [d for d in self._demos if not d.recording_complete]
             for demo in self._demos:
-                demo.add_message(self.angles, msg, has_server_info)
+                if len(msg) > 0:
+                    demo.add_message(self.angles, msg, has_server_info)
 
     async def wait_for_movement(self, entity_num):
         return await self._moved_fut[entity_num]

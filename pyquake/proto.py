@@ -1129,7 +1129,7 @@ def read_demo_file(f):
         msg = _read(f, msg_len)
         while msg:
             parsed, msg = ServerMessage.parse_message(msg, protocol)
-            if parsed.msg_type == ServerMessageType.SERVERINFO: 
+            if parsed.msg_type == ServerMessageType.SERVERINFO:
                 protocol = parsed.protocol
             yield not bool(msg), view_angles, parsed
 
