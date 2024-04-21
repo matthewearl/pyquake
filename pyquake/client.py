@@ -211,7 +211,14 @@ class Entity:
     angles: tuple[float, float, float]
 
     @classmethod
-    def from_baseline(cls, baseline: proto.ServerMessageSpawnBaseline):
+    def make_zero_baseline(cls) -> "Entity":
+        return cls(
+            0, 0, 0, 0, 0, (0., 0., 0.), (0., 0., 0.)
+        )
+
+    @classmethod
+    def from_baseline(cls, baseline: proto.ServerMessageSpawnBaseline) \
+            -> "Entity":
         return cls(
             baseline.entity_num,
             baseline.model_num,
@@ -219,22 +226,33 @@ class Entity:
             baseline.colormap,
             baseline.skin,
             baseline.origin,
-            baseline.angles
+            baseline.angles,
         )
 
-    def update(self, update: proto.ServerMessageUpdate):
-        if update.entity_num is not None:
-            self.entity_num = update.entity_num
-        if update.model_num is not None:
-            self.model_num = update.model_num
-        if update.frame is not None:
-            self.frame = update.frame
-        if update.colormap is not None:
-            self.colormap = update.colormap
-        if update.skin is not None:
-            self.skin = update.skin
-        self.origin = _patch_vec(self.origin, update.origin)
-        self.angles = _patch_vec(self.angles, update.angle)
+    def update(self,
+               update: proto.ServerMessageUpdate) -> "Entity":
+        entity_num = update.entity_num
+        model_num = (
+            update.model_num
+            if update.model_num is not None else self.model_num
+        )
+        frame = (
+            update.frame
+            if update.frame is not None else self.frame
+        )
+        colormap = (
+            update.colormap
+            if update.colormap is not None else self.colormap
+        )
+        skin = (
+            update.skin
+            if update.skin is not None else self.skin
+        )
+        origin = _patch_vec(self.origin, update.origin)
+        angles = _patch_vec(self.angles, update.angle)
+
+        return Entity(entity_num, model_num, frame, colormap, skin, origin,
+                      angles)
 
 
 class AsyncClient:
@@ -245,7 +263,7 @@ class AsyncClient:
         self.view_entity = None
         self.level_finished = False
         self.time = None
-        self._moved_fut = collections.defaultdict(asyncio.Future)
+        self._updated_fut = asyncio.Future()
         self.center_print_queue = asyncio.Queue()
         self.entities = {}
         self.baselines = {}
@@ -269,10 +287,14 @@ class AsyncClient:
         return d
 
     async def _read_messages(self, protocol):
+        zero_baseline = Entity.make_zero_baseline()
+
         while True:
             remaining_msg = msg = await self._conn.read_message()
 
+            has_client_update = False
             has_server_info = False
+            next_entities = {}
             while remaining_msg:
                 parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg, protocol)
                 logger.debug("Got message: %s", parsed)
@@ -315,22 +337,17 @@ class AsyncClient:
                     self.velocity = parsed.m_velocity
                     self.on_ground = parsed.on_ground
                     self.view_height = parsed.view_height
+                    has_client_update = True
 
                 # Update entity positions
                 if parsed.msg_type == proto.ServerMessageType.SPAWNBASELINE:
                     if self.view_entity is None:
                         raise ClientError("View entity not set but spawnbaseline received")
-                    ent = Entity.from_baseline(parsed)
-                    self.baselines[parsed.entity_num] = ent
-                    self.entities[parsed.entity_num] = ent
+                    self.baselines[parsed.entity_num] = Entity.from_baseline(parsed)
                 if parsed.msg_type == proto.ServerMessageType.UPDATE:
                     ent_num = parsed.entity_num
-                    if ent_num in self.entities:
-                        ent = self.entities[ent_num]
-                        ent.update(parsed)
-                        if parsed.entity_num in self._moved_fut:
-                            self._moved_fut[ent_num].set_result(ent.origin)
-                        self._moved_fut[ent_num] = asyncio.Future()
+                    baseline = self.baselines.get(ent_num, zero_baseline)
+                    next_entities[ent_num] = baseline.update(parsed)
 
                 if parsed.msg_type == proto.ServerMessageType.PRINT:
                     logger.info("Print: %s", parsed.string)
@@ -347,13 +364,18 @@ class AsyncClient:
                 if parsed.msg_type == proto.ServerMessageType.DISCONNECT:
                     self.disconnected = True
 
+            if has_client_update:
+                self.entities = next_entities
+                self._updated_fut.set_result(None)
+                self._updated_fut = asyncio.Future()
+
             self._demos = [d for d in self._demos if not d.recording_complete]
             for demo in self._demos:
                 if len(msg) > 0:
                     demo.add_message(self.angles, msg, has_server_info)
 
-    async def wait_for_movement(self, entity_num):
-        return await self._moved_fut[entity_num]
+    async def wait_for_update(self):
+        await self._updated_fut
 
     async def wait_until_spawn(self):
         await self._spawned_fut
