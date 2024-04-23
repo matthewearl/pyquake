@@ -350,7 +350,7 @@ class AsyncClient:
                     next_entities[ent_num] = baseline.update(parsed)
 
                 if parsed.msg_type == proto.ServerMessageType.PRINT:
-                    logger.info("Print: %s", parsed.string)
+                    logger.debug("Print: %s", parsed.string)
                 if parsed.msg_type == proto.ServerMessageType.CENTERPRINT:
                     logger.info("Center print: %s", parsed.string)
                     await self.center_print_queue.put(parsed.string)
