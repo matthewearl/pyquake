@@ -259,12 +259,12 @@ class AsyncClient:
     def __init__(self, conn):
         self._conn = conn
         self._spawned_fut = asyncio.Future()
+        self._center_print_fut = asyncio.Future()
         self.level_name = None
         self.view_entity = None
         self.level_finished = False
         self.time = None
         self._updated_fut = asyncio.Future()
-        self.center_print_queue = asyncio.Queue()
         self.entities = {}
         self.baselines = {}
         self.angles = (0., 0., 0.)
@@ -353,7 +353,13 @@ class AsyncClient:
                     logger.debug("Print: %s", parsed.string)
                 if parsed.msg_type == proto.ServerMessageType.CENTERPRINT:
                     logger.info("Center print: %s", parsed.string)
-                    await self.center_print_queue.put(parsed.string)
+                    self._center_print_fut.set_result(parsed.string)
+                    self._center_print_fut = asyncio.Future()
+
+                    # Step all tasks that were waiting on the previous future,
+                    # so they have a chance to immediately wait on the next
+                    # future.
+                    await asyncio.sleep(0)
 
                 if parsed.msg_type == proto.ServerMessageType.TIME:
                     self.time = parsed.time
@@ -379,6 +385,9 @@ class AsyncClient:
 
     async def wait_until_spawn(self):
         await self._spawned_fut
+
+    async def wait_for_center_print(self):
+        return await self._center_print_fut
 
     @classmethod
     async def connect(cls, host, port, protocol, joequake_version=None):
