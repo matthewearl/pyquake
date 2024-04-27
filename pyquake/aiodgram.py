@@ -160,8 +160,10 @@ class DatagramConnection:
                         body[5], mod_version, mod_flags)
             if (desired_joequake_version is not None and 
                     mod_version != desired_joequake_version):
-                raise DatagramError("Server JoeQuake version doesn't match "
-                                    "desired version")
+                raise DatagramError(
+                    f"Server JoeQuake version ({mod_version}) doesn't match "
+                    f"desired version ({desired_joequake_version})"
+                )
         elif desired_joequake_version is not None:
             raise DatagramError("Server does not support JoeQuake protocol")
         self.joequake_version = desired_joequake_version
