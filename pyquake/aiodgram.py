@@ -48,8 +48,19 @@ _SUPPORTED_FLAG_COMBINATIONS = (
     _NetFlags.ACK,
 )
 
+
 class DatagramError(Exception):
     pass
+
+
+class BadJoeQuakeVersion(DatagramError):
+    def __init__(self, supported_version, desired_version):
+        msg = (
+            f"Server JoeQuake version ({supported_version}) doesn't match "
+            f"desired version ({desired_version})"
+        )
+        super().__init__(msg)
+        self.supported_version = supported_version
 
 
 class _GenericUdpProtocol(asyncio.Protocol):
@@ -158,14 +169,11 @@ class DatagramConnection:
             mod_flags = body[7] if len(body) > 7 else 0
             logger.info("Server mod: 0x%x, version: 0x%x, flags: 0x%x",
                         body[5], mod_version, mod_flags)
-            if (desired_joequake_version is not None and 
+            if (desired_joequake_version is not None and
                     mod_version != desired_joequake_version):
-                raise DatagramError(
-                    f"Server JoeQuake version ({mod_version}) doesn't match "
-                    f"desired version ({desired_joequake_version})"
-                )
+                raise BadJoeQuakeVersion(mod_version, desired_joequake_version)
         elif desired_joequake_version is not None:
-            raise DatagramError("Server does not support JoeQuake protocol")
+            raise BadJoeQuakeVersion(None, desired_joequake_version)
         self.joequake_version = desired_joequake_version
 
         logger.info("Connected")
