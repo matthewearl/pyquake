@@ -52,8 +52,10 @@ def _encode_angle_16(angle):
     return int(round((angle * 32768 / math.pi))) % 65536
 
 
-def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse, joequake_version=None):
-    if joequake_version is None:
+def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse,
+                    protocol, joequake_version=None):
+    if (joequake_version is None
+            and protocol.version == proto.ProtocolVersion.NETQUAKE):
         fmt = "<BfBBBhhhBB"
         encode_func = _encode_angle
     else:
@@ -256,10 +258,11 @@ class Entity:
 
 
 class AsyncClient:
-    def __init__(self, conn):
+    def __init__(self, conn, protocol):
         self._conn = conn
         self._spawned_fut = asyncio.Future()
         self._center_print_fut = asyncio.Future()
+        self._protocol = protocol
         self.level_name = None
         self.view_entity = None
         self.level_finished = False
@@ -402,7 +405,7 @@ class AsyncClient:
         if conn.joequake_version is not None and conn.joequake_version >= 34:
             await conn.send_reliable(b'\x01')
 
-        client = cls(conn)
+        client = cls(conn, protocol)
         asyncio.create_task(client._read_messages(protocol)).add_done_callback(
                 lambda fut: fut.result)
         return client
@@ -411,6 +414,7 @@ class AsyncClient:
         self.angles = (pitch, yaw, roll)
         self._conn.send(_make_move_body(pitch, yaw, roll,
                                         forward, side, up, buttons, impulse,
+                                        self._protocol,
                                         self.joequake_version))
 
     async def send_command(self, cmd):
