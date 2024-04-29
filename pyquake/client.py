@@ -53,9 +53,8 @@ def _encode_angle_16(angle):
 
 
 def _make_move_body(pitch, yaw, roll, forward, side, up, buttons, impulse,
-                    protocol, joequake_version=None):
-    if (joequake_version is None
-            and protocol.version == proto.ProtocolVersion.NETQUAKE):
+                    high_res_inputs=False):
+    if not high_res_inputs:
         fmt = "<BfBBBhhhBB"
         encode_func = _encode_angle
     else:
@@ -262,7 +261,7 @@ class AsyncClient:
         self._conn = conn
         self._spawned_fut = asyncio.Future()
         self._center_print_fut = asyncio.Future()
-        self._protocol = protocol
+        self.protocol = protocol
         self.level_name = None
         self.view_entity = None
         self.level_finished = False
@@ -289,7 +288,7 @@ class AsyncClient:
         d.start_recording()
         return d
 
-    async def _read_messages(self, protocol):
+    async def _read_messages(self):
         zero_baseline = Entity.make_zero_baseline()
 
         while True:
@@ -299,7 +298,9 @@ class AsyncClient:
             has_server_info = False
             next_entities = {}
             while remaining_msg:
-                parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg, protocol)
+                parsed, remaining_msg = proto.ServerMessage.parse_message(
+                    remaining_msg, self.protocol
+                )
                 logger.debug("Got message: %s", parsed)
 
                 # Player goes "unspawned" when server info received (see SV_SendServerinfo).
@@ -310,7 +311,12 @@ class AsyncClient:
                     self.models = parsed.models
                     has_server_info = True
 
-                    protocol = parsed.protocol
+                    if parsed.protocol != self.protocol:
+                        logger.warning(
+                            'protocol changed from %s to %s by server',
+                            self.protocol, parsed.protocol
+                        )
+                    self.protocol = parsed.protocol
 
                 # Handle sign-on.
                 if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
@@ -406,7 +412,7 @@ class AsyncClient:
             await conn.send_reliable(b'\x01')
 
         client = cls(conn, protocol)
-        asyncio.create_task(client._read_messages(protocol)).add_done_callback(
+        asyncio.create_task(client._read_messages()).add_done_callback(
                 lambda fut: fut.result)
         return client
 
@@ -414,8 +420,7 @@ class AsyncClient:
         self.angles = (pitch, yaw, roll)
         self._conn.send(_make_move_body(pitch, yaw, roll,
                                         forward, side, up, buttons, impulse,
-                                        self._protocol,
-                                        self.joequake_version))
+                                        self.high_res_inputs))
 
     async def send_command(self, cmd):
         await self._conn.send_reliable(_make_cmd_body(cmd))
@@ -423,6 +428,12 @@ class AsyncClient:
     async def disconnect(self):
         self._conn.disconnect()
         await self._conn.wait_until_disconnected()
+
+    def high_res_inputs(self):
+        return (
+            self.joequake_version is not None
+                or protocol.version != proto.ProtocolVersion.NETQUAKE
+        )
 
     @property
     def joequake_version(self):
