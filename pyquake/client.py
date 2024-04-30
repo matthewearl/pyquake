@@ -429,10 +429,11 @@ class AsyncClient:
         self._conn.disconnect()
         await self._conn.wait_until_disconnected()
 
+    @property
     def high_res_inputs(self):
         return (
             self.joequake_version is not None
-                or protocol.version != proto.ProtocolVersion.NETQUAKE
+                or self.protocol.version != proto.ProtocolVersion.NETQUAKE
         )
 
     @property
