@@ -257,11 +257,14 @@ class Entity:
 
 
 class AsyncClient:
-    def __init__(self, conn, protocol):
+    def __init__(self, conn):
         self._conn = conn
         self._spawned_fut = asyncio.Future()
         self._center_print_fut = asyncio.Future()
-        self.protocol = protocol
+        self.protocol = proto.Protocol(
+            proto.ProtocolVersion.NETQUAKE,
+            proto.ProtocolFlags(0)
+        )  # May be changed when server info is received.
         self.level_name = None
         self.view_entity = None
         self.level_finished = False
@@ -399,7 +402,7 @@ class AsyncClient:
         return await self._center_print_fut
 
     @classmethod
-    async def connect(cls, host, port, protocol, joequake_version=None):
+    async def connect(cls, host, port, joequake_version=None):
         """Connect to the given host and port, and start listening for messages.
 
         At the point this coroutine returns, no messages have yet been read.
@@ -411,7 +414,7 @@ class AsyncClient:
         if conn.joequake_version is not None and conn.joequake_version >= 34:
             await conn.send_reliable(b'\x01')
 
-        client = cls(conn, protocol)
+        client = cls(conn)
         asyncio.create_task(client._read_messages()).add_done_callback(
                 lambda fut: fut.result)
         return client
