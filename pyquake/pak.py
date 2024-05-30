@@ -93,7 +93,7 @@ class Filesystem(collections.abc.Mapping):
     """Interface to a .pak file based filesystem."""
 
     def __init__(self, base_dir, game: Optional[str] = None):
-        base_dir = pathlib.Path(base_dir)
+        base_dir = pathlib.Path(base_dir).resolve()
         self._game_dirs = [(base_dir / "id1").resolve()]
 
         for game_dir in self._game_dirs:
