@@ -21,7 +21,7 @@ setup(name='Pyquake',
           ]
       },
       description='Python Quake client',
-      install_requires=['numpy', 'scipy', 'parsley'],
+      install_requires=['numpy', 'scipy'],
       author='Matt Earl',
       packages=['pyquake'])
 
