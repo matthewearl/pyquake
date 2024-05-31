@@ -1,4 +1,4 @@
-# Copyright (c) 2019 Matthew Earl
+# Copyright (c) 2024 Matthew Earl
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,18 +19,15 @@
 #     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import asyncio
-import collections
 import dataclasses
 import logging
 import math
 import struct
-import time
 
 import numpy as np
 
 from . import aiodgram
 from . import proto
-from . import dgram
 
 
 logger = logging.getLogger()
@@ -111,7 +108,8 @@ class Demo:
             parsed_msgs = []
             remaining_msg = msg
             while remaining_msg:
-                parsed, remaining_msg = proto.ServerMessage.parse_message(remaining_msg)
+                parsed, remaining_msg = proto.ServerMessage.parse_message(
+                        remaining_msg)
                 parsed_msgs.append(parsed)
             yield parsed_msgs
 
@@ -125,11 +123,15 @@ class Demo:
             all_angles = self._angles
 
         for msg, angles in zip(self._msgs, all_angles):
-            f.write(struct.pack(demo_header_fmt, len(msg), *(180. * a / math.pi for a in angles)))
+            f.write(struct.pack(demo_header_fmt,
+                                len(msg),
+                                *(180. * a / math.pi for a in angles)))
             f.write(msg)
 
 
 class _BaseAngleCalculator:
+    """Pass into `Demo.dump` to override view angles."""
+
     def _angle_difference(self, a, b):
         t = (a - b) % (np.pi * 2.)
         return min(t, 2. * np.pi - t)
@@ -436,7 +438,7 @@ class AsyncClient:
     def high_res_inputs(self):
         return (
             self.joequake_version is not None
-                or self.protocol.version != proto.ProtocolVersion.NETQUAKE
+            or self.protocol.version != proto.ProtocolVersion.NETQUAKE
         )
 
     @property
@@ -446,88 +448,37 @@ class AsyncClient:
 
 async def _monitor_movements(client):
     while True:
-        origin = await client.wait_for_movement(client.view_entity)
-        logger.debug("Player moved to %s", origin)
-
-
-async def _perf_benchmark(client):
-    """Benchmark for measuring the move-rate with sync_movements 1."""
-    start = time.perf_counter()
-    for i in range(10000):
-        client.move(0, 0, 0, 400, 0, 0, 0, 0)
-        await client.wait_for_movement()
-    logger.info("Took %s seconds", time.perf_counter() - start)
+        await client.wait_for_update()
+        logger.info("%s: Player origin %s",
+                    client.time, client.player_entity.origin)
 
 
 async def _aioclient():
     host, port = "localhost", 26000
 
     client = await AsyncClient.connect(host, port)
-    demo = client.record_demo()
     logger.info("Connected to %s %s", host, port)
-
-    asyncio.ensure_future(_monitor_movements(client)).add_done_callback(
-            lambda fut: fut.result)
+    demo = client.record_demo()
 
     try:
         await client.wait_until_spawn()
+        asyncio.ensure_future(_monitor_movements(client))
 
         for i in range(3):
-            client.move(*client._angles, 320, 0, 0, 0, 0)
+            client.move(*client.angles, 320, 0, 0, 0, 0)
             await asyncio.sleep(1)
-            client.move(*client._angles, -320, 0, 0, 0, 0)
+            client.move(*client.angles, -320, 0, 0, 0, 0)
             await asyncio.sleep(1)
             if i == 1:
                 await client.send_command("kill")
                 await asyncio.sleep(1)
-
-        demo.stop_recording()
-        from pprint import pprint
-
-        def decode_msg(msg):
-            while msg:
-                parsed, msg = proto.ServerMessage.parse_message(msg)
-                yield parsed
-        pprint(list(zip(demo._angles, (list(decode_msg(msg)) for msg in demo._msgs))))
-        with open("pyquake.dem", "wb") as f:
-            demo.dump(f)
     finally:
         await client.disconnect()
         demo.stop_recording()
+        with open('pyquake.dem', 'wb') as f:
+            demo.dump(f)
 
 
 def aioclient_main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(message)s')
     asyncio.run(_aioclient())
-
-
-def client_main():
-    logging.basicConfig(level=logging.INFO)
-
-    host, port = "localhost", 26000
-
-    conn = dgram.DatagramConnection.connect(host, port)
-    spawned = False
-
-    try:
-        for msg in conn.iter_messages():
-            while msg:
-                parsed, msg = proto.ServerMessage.parse_message(msg)
-                logger.debug("Got message: %s", parsed)
-
-                if parsed.msg_type == proto.ServerMessageType.SIGNONNUM:
-                    if parsed.num == 1:
-                        conn.send(_make_cmd_body("prespawn"), reliable=True)
-                    elif parsed.num == 2:
-                        body = (_make_cmd_body('name "pyquake"\n') +
-                                _make_cmd_body("color 0 0\n") +
-                                _make_cmd_body("spawn "))
-                        conn.send(body, reliable=True)
-                    elif parsed.num == 3:
-                        conn.send(_make_cmd_body("begin"), reliable=True)
-                elif parsed.msg_type == proto.ServerMessageType.UPDATECOLORS:
-                    spawned = True
-                elif spawned:
-                    conn.send(_make_move_body(0, 0, 0, 0, 0, 0, 3, 0))
-    except KeyboardInterrupt:
-        conn.disconnect()
