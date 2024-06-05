@@ -40,6 +40,7 @@ _CLOSE_LINE = re.compile(r'}')
 _DEF_LINE = re.compile(r'"(?P<key>[^"]*)" *"(?P<value>[^"]*)"')
 
 
+# TODO:  Field defs should be read from a progs.dat.
 _VEC_KEYS = ['origin']
 _FLOAT_KEYS = ['angle']
 

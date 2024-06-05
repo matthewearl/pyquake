@@ -1,4 +1,4 @@
-# Copyright (c) 2019 Matthew Earl
+# Copyright (c) 2024 Matthew Earl
 # 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,6 @@ from typing import NamedTuple, Tuple, List, Iterable
 import numpy as np
 
 from . import boxpack
-from . import ent
 from . import simplex
 
 
@@ -690,8 +689,8 @@ class Bsp:
 
     def _read_texture(self, f, tex_offset):
         f.seek(tex_offset)
-        name, width, height, *data_offsets = self._read_struct(f, "<16sLL4L")
-        name = name[:name.index(b'\0')].decode('ascii')
+        name, width, height, *data_offsets = self._read_struct(f, "<16sLL4l")
+        name = name[:name.index(b'\0')].decode('latin')
 
         if width % 16 != 0 or height % 16 != 0:
             raise MalformedBspFile('Texture has invalid dimensions: {} x {}'.format(width, height))
@@ -699,11 +698,14 @@ class Bsp:
         offset = 40
         data = []
         for i in range(4):
-            if offset != data_offsets[i]:
-                raise MalformedBspFile('Data offset is {} expected {}'.format(data_offsets[i], offset))
-            mip_size = (width * height) >> (2 * i)
-            data.append(self._read(f, mip_size))
-            offset += mip_size
+            if data_offsets[i] == -1:
+                data.append(None)
+            else:
+                if offset != data_offsets[i]:
+                    raise MalformedBspFile('Data offset is {} expected {}'.format(data_offsets[i], offset))
+                mip_size = (width * height) >> (2 * i)
+                data.append(self._read(f, mip_size))
+                offset += mip_size
         return Texture(name, width, height, data)
 
     def _read_textures(self, f, texture_dir_entry):
@@ -804,8 +806,7 @@ class Bsp:
         entity_dir_entry = self._read_dir_entry(f, 0)
         f.seek(entity_dir_entry.offset)
         b = self._read(f, entity_dir_entry.size)
-        self.entities_string = b[:b.index(b'\0')].decode('ascii')
-        self.entities = ent.parse_entities(self.entities_string)
+        self.entities_string = b[:b.index(b'\0')].decode('latin')
 
         logging.debug("Reading visdata")
         visinfo_dir_entry = self._read_dir_entry(f, 4)
